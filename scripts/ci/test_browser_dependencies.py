@@ -1,5 +1,6 @@
 """Synthetic APT fixtures; never modify a workstation or production host."""
 
+import json
 import os
 import tempfile
 import unittest
@@ -52,12 +53,34 @@ class BrowserDependenciesTests(unittest.TestCase):
     def test_credentialed_or_unexpected_mirror_is_rejected(self):
         for uri in [
             "https://user:password@azure.archive.ubuntu.com/ubuntu",
+            "https://@azure.archive.ubuntu.com/ubuntu",
+            "https://:@azure.archive.ubuntu.com/ubuntu",
+            "https://azure.archive.ubuntu.com:0/ubuntu",
             "https://azure.archive.ubuntu.com:444/ubuntu",
             "https://azure.archive.ubuntu.com/other",
             "https://azure.archive.ubuntu.com/ubuntu?override=1",
         ]:
             with self.subTest(uri=uri), self.assertRaises(ValueError):
                 browser.rewrite_sources("deb " + uri + " noble main\n")
+
+    def test_uri_parse_errors_do_not_expose_credentialed_nfkc_netloc(self):
+        uri = "https://private-user:private-password@azure.archive.ubuntu.com\uff0fprivate-path/ubuntu/"
+        for convert in (
+            lambda: browser.rewrite_sources("deb " + uri + " noble main\n"),
+            lambda: browser.rewrite_mirror_list(uri + " priority:1\n"),
+        ):
+            with self.subTest(convert=convert), self.assertRaises(ValueError) as failure:
+                convert()
+            self.assertIn("URI structure", str(failure.exception))
+            self.assertTrue(failure.exception.__suppress_context__)
+            for private in ("private-user", "private-password", "private-path"):
+                self.assertNotIn(private, str(failure.exception))
+
+    def test_invalid_source_port_value_is_redacted(self):
+        with self.assertRaises(ValueError) as failure:
+            browser.rewrite_sources("deb https://azure.archive.ubuntu.com:private-port/ubuntu noble main\n")
+        self.assertNotIn("private-port", str(failure.exception))
+        self.assertTrue(failure.exception.__suppress_context__)
 
     def test_refuses_local_persistent_and_unrelated_runner(self):
         for values in [
@@ -163,6 +186,52 @@ class BrowserDependenciesTests(unittest.TestCase):
         ]:
             with self.subTest(text=text), self.assertRaises(ValueError):
                 browser.rewrite_mirror_list(text)
+
+    def test_rejected_mirror_diagnostic_reports_only_bounded_uri_structure(self):
+        private_values = ["private-user", "private-password", "private-path", "private-query", "private-fragment"]
+        uri = "https://private-user:private-password@archive.ubuntu.com:443/private-path?private-query#private-fragment"
+        with self.assertRaises(ValueError) as failure:
+            browser.rewrite_mirror_list("# existing runner mirror\n" + uri + " priority:2\n")
+        message = str(failure.exception)
+        for value in private_values:
+            self.assertNotIn(value, message)
+        details = json.loads(message.split(": ", 1)[1])
+        self.assertEqual(details, {
+            "line": 2,
+            "scheme": "https",
+            "hostname": "archive.ubuntu.com",
+            "port": 443,
+            "archive_path": "redacted",
+            "path_length": len("/private-path"),
+            "credentials_present": True,
+            "query_present": True,
+            "fragment_present": True,
+        })
+
+    def test_rejected_host_and_port_remain_rejected_with_safe_diagnostics(self):
+        for uri, expected_host, expected_port in [
+            ("https://unlisted.example/ubuntu/", "unlisted.example", None),
+            ("https://@archive.ubuntu.com/ubuntu/", "archive.ubuntu.com", None),
+            ("https://:@archive.ubuntu.com/ubuntu/", "archive.ubuntu.com", None),
+            ("https://archive.ubuntu.com:0/ubuntu/", "archive.ubuntu.com", 0),
+            ("https://archive.ubuntu.com:443/ubuntu/", "archive.ubuntu.com", 443),
+            ("https://archive.ubuntu.com:private-port/ubuntu/", "archive.ubuntu.com", "invalid"),
+            ("https://private-user:private-password@archive.ubuntu.com:invalid/ubuntu/", "archive.ubuntu.com", "invalid"),
+            ("https://private-user:private-password@" + "x" * 254 + "/ubuntu/", "redacted", None),
+            ("https://private-user:private-password@private%20host/ubuntu/", "redacted", None),
+        ]:
+            with self.subTest(uri=uri), self.assertRaises(ValueError) as failure:
+                browser.rewrite_mirror_list(uri + " priority:2\n")
+            message = str(failure.exception)
+            details = json.loads(message.split(": ", 1)[1])
+            self.assertEqual(details["hostname"], expected_host)
+            self.assertEqual(details["port"], expected_port)
+            self.assertEqual(details["archive_path"], "/ubuntu/")
+            self.assertLess(len(message), 600)
+            self.assertNotIn("private-user", message)
+            self.assertNotIn("private-password", message)
+            self.assertNotIn("private-port", message)
+            self.assertNotIn("private%20host", message)
 
     def test_invalid_referenced_mirror_preserves_all_existing_sources(self):
         with tempfile.TemporaryDirectory() as directory:

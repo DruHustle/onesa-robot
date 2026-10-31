@@ -32,6 +32,7 @@ async function fixture(page, authenticated = true) {
 async function settled(page) {
   await expect(page.locator('#nvidia-library')).toHaveAttribute('data-view-state', /^(ready|fallback)$/, {timeout:20_000});
   const state = await page.locator('#nvidia-library').getAttribute('data-view-state');
+  if (process.env.ROBOT_REQUIRE_WEBGL === 'true') expect(state, 'Rendering qualification requires actual WebGL').toBe('ready');
   if (state === 'ready') await expect(page.locator('#nvidia-stage canvas')).toBeVisible();
   else await expect(page.locator('#nvidia-preview')).toBeVisible();
   return state;
@@ -42,7 +43,6 @@ test('automatic local references preserve source, controls, keyboard and system 
   for (const [id, name] of [['nvidia-transfer-conveyor','Transfer conveyor'], ['nvidia-mobile-cart','Mobile cart'], ['nvidia-storage-rack','Warehouse rack']]) {
     await page.locator('#nvidia-select').selectOption(id);
     const state = await settled(page);
-    if (process.env.ROBOT_REQUIRE_WEBGL === 'true') expect(state, 'The supplemental rendering probe requires real WebGL').toBe('ready');
     await expect(page.locator('#nvidia-attribution')).toContainText(`${name} by NVIDIA`);
     await expect(page.locator('#nvidia-license')).toHaveAttribute('href', `/models/nvidia/${id}/LICENSE.txt`);
     if (state === 'ready') {
@@ -52,16 +52,20 @@ test('automatic local references preserve source, controls, keyboard and system 
       await expect(page.locator('#nvidia-dimensions')).toContainText('Reference size:');
     }
     await page.locator('#nvidia-select').focus();
-    await page.emulateMedia({colorScheme:'dark',reducedMotion:'reduce'});
-    await expect(page.locator('#nvidia-select')).toBeFocused();
-    await expect(page.locator('#nvidia-select')).toHaveValue(id);
-    await page.emulateMedia({colorScheme:'light'});
+    for (const [colorScheme, foreground] of [['dark','rgb(229, 237, 246)'], ['light','rgb(16, 38, 62)']]) {
+      await page.emulateMedia({colorScheme,reducedMotion:'reduce'});
+      await expect(page.locator('#nvidia-select')).toBeFocused();
+      await expect(page.locator('#nvidia-select')).toHaveValue(id);
+      await expect.poll(() => page.locator('.nvidia-attribution a').evaluateAll(links => links.map(link => getComputedStyle(link).color))).toEqual([foreground,foreground,foreground]);
+    }
   }
   expect(fixtureState.models.length).toBeGreaterThanOrEqual(3);
   expect(fixtureState.mutations).toEqual([]); expect(fixtureState.errors).toEqual([]);
   await page.setViewportSize({width:320,height:860});
   await page.locator('#nvidia-library').scrollIntoViewIfNeeded();
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect((await new AxeBuilder({page}).include('#nvidia-library').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
+  await page.emulateMedia({colorScheme:'dark'});
   expect((await new AxeBuilder({page}).include('#nvidia-library').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()).violations).toEqual([]);
 });
 
@@ -146,7 +150,6 @@ test('graphics context loss retains preview, independent Stop and a recoverable 
   await page.getByRole('button',{name:'Stop simulation',exact:true}).click();
   await page.locator('#nvidia-library').scrollIntoViewIfNeeded();
   await page.locator('#nvidia-retry').click();
-  const recovered = await settled(page);
-  if (process.env.ROBOT_REQUIRE_WEBGL === 'true') expect(recovered).toBe('ready');
+  await settled(page);
   expect(state.mutations).toEqual(['/api/v1/stop']); expect(state.errors).toEqual([]);
 });

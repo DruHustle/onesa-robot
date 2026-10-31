@@ -31,13 +31,20 @@ def rewrite_sources(text, deb822=False, mirror_files=None):
             ):
                 mirror_files.add("apt-mirrors.txt")
             return value
-        uri = urlsplit(value)
+        try:
+            uri = urlsplit(value)
+        except ValueError:
+            raise ValueError("Invalid Ubuntu mirror URI structure; no rewrite performed") from None
         if uri.hostname != "azure.archive.ubuntu.com":
             return value
+        try:
+            port = uri.port
+        except ValueError:
+            raise ValueError("Invalid Ubuntu mirror port; no rewrite performed") from None
         if (
-            uri.username
-            or uri.password
-            or uri.port
+            uri.username is not None
+            or uri.password is not None
+            or port is not None
             or uri.query
             or uri.fragment
             or uri.path not in {"/ubuntu", "/ubuntu/"}
@@ -72,6 +79,30 @@ def rewrite_sources(text, deb822=False, mirror_files=None):
     return "".join(result), changes
 
 
+def mirror_uri_diagnostic(uri, line_number):
+    """Report bounded public URI structure without credentials or arbitrary paths."""
+    hostname = uri.hostname or ""
+    try:
+        port = uri.port
+    except ValueError:
+        port = "invalid"
+    return {
+        "line": line_number,
+        "scheme": uri.scheme if uri.scheme in {"http", "https"} else "redacted",
+        "hostname": hostname
+        if re.fullmatch(r"[a-zA-Z0-9.-]{1,253}", hostname)
+        else "redacted",
+        "port": port,
+        "archive_path": uri.path
+        if uri.path in {"/ubuntu", "/ubuntu/"}
+        else "redacted",
+        "path_length": len(uri.path),
+        "credentials_present": uri.username is not None or uri.password is not None,
+        "query_present": bool(uri.query),
+        "fragment_present": bool(uri.fragment),
+    }
+
+
 def rewrite_mirror_list(text):
     """Remove only Azure from the runner's referenced archive failover list."""
     if len(text.splitlines()) > 32:
@@ -79,7 +110,7 @@ def rewrite_mirror_list(text):
     output = []
     removed = 0
     canonical = False
-    for line in text.splitlines(keepends=True):
+    for line_number, line in enumerate(text.splitlines(keepends=True), 1):
         if not line.strip() or line.lstrip().startswith("#"):
             output.append(line)
             continue
@@ -88,12 +119,19 @@ def rewrite_mirror_list(text):
         )
         if not match:
             raise ValueError("Unexpected runner mirror-list entry")
-        uri = urlsplit(match.group(1))
+        try:
+            uri = urlsplit(match.group(1))
+        except ValueError:
+            raise ValueError("Invalid runner mirror-list URI structure") from None
+        try:
+            port = uri.port
+        except ValueError:
+            port = "invalid"
         if (
             uri.scheme not in {"http", "https"}
-            or uri.username
-            or uri.password
-            or uri.port
+            or uri.username is not None
+            or uri.password is not None
+            or port is not None
             or uri.query
             or uri.fragment
             or uri.path not in {"/ubuntu", "/ubuntu/"}
@@ -104,7 +142,10 @@ def rewrite_mirror_list(text):
                 "security.ubuntu.com",
             }
         ):
-            raise ValueError("Unexpected runner mirror-list URI")
+            raise ValueError(
+                "Unexpected runner mirror-list URI: "
+                + json.dumps(mirror_uri_diagnostic(uri, line_number), sort_keys=True)
+            )
         if uri.hostname == "azure.archive.ubuntu.com":
             removed += 1
             continue

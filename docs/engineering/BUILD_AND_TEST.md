@@ -10,13 +10,26 @@ and retain unknown-path/traversal denial.
 `tests/browser/nvidia-library.spec.mjs` covers automatic loading, all three
 selections, system appearance and keyboard focus, narrow layouts and accessibility,
 failed/corrupt downloads, missing/lost graphics, explicit recovery, stale selection
-and sign-out cancellation. It checks that visual interaction issues no mission or
+and sign-out cancellation. Source/license/provenance links resolve the active system
+foreground directly, with synchronous gallery colors under reduced motion; browser
+checks cover link colors after each theme change and accessibility in both modes.
+It checks that visual interaction issues no mission or
 control mutation and that independent Stop/sign-out remain usable. When WebGL is
-unavailable, the rendered-preview path remains required. Set
-`ROBOT_REQUIRE_WEBGL=true` only in an actual graphics-capable supplemental run to
-require successful rendering and recovery; this strengthens those assertions.
+unavailable, the explicitly injected missing-graphics test still requires the preview.
+Native CI sets `ROBOT_REQUIRE_WEBGL=true` so every successful-load, selection and
+recovery flow requires actual rendering in all three engines. It runs the combined
+matrix under a disposable 1920×1080×24 Xvfb display and uses headed Firefox because
+the stock Linux headless Firefox profile disables WebGL 2. The single report keeps
+all engine outcomes, and no test is skipped or retried. The same environment setting
+can strengthen an actual graphics-capable supplemental run.
 Local supplemental browser versions never substitute for the three pinned CI
 engines or fresh source-bound hosted acceptance. No physical hardware is used.
+
+The disposable CI runner's Ubuntu source preparation retains its exact mirror
+allowlist, canonical HTTPS archive and signing/suite fields. Rejected sources report
+only bounded URI structure; credentials, arbitrary paths and query/fragment values
+stay redacted, including malformed Unicode parsing failures. Explicit zero ports
+and empty user information are rejected before any source file is rewritten.
 
 Legacy joint and inspection supervision now renews its heartbeat only after both
 status and owned history reads succeed and their simulation-only payloads validate.

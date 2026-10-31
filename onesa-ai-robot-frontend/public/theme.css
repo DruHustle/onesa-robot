@@ -52,12 +52,12 @@ h1,h2,h3{font-weight:600;letter-spacing:-.035em;line-height:1.12}h1{font-size:cl
 @media(max-width:700px){.operator-shell[data-session="authenticated"] #console{padding-top:20px}.operator-shell[data-session="authenticated"] h1{font-size:1.8rem;margin:6px 0}.operator-shell[data-session="authenticated"] .console-heading .eyebrow{font-size:.65rem;margin:4px 0}.operator-shell[data-session="authenticated"] #console-description{font-size:.85rem;line-height:1.6;margin:10px 0}.operator-shell[data-session="authenticated"] #notice{min-height:0;margin:10px 0;font-size:.85rem;line-height:1.5}.workspace-nav{margin:10px 0}.operator-shell #next-step{padding:10px 12px;font-size:.82rem;line-height:1.5;margin:8px 0}.mission-heading .eyebrow{font-size:.65rem;margin:6px 0}.mission-heading h2{font-size:1.6rem}.mission-heading p{line-height:1.5;margin:6px 0}.inspection-grid{margin-top:12px}}
 /* Media-dependent foregrounds invalidate inherited off-screen text in WebKit. */
 @media(prefers-color-scheme:light){
-.operator-shell :where(h1,h2,h3,p,label,dt,dd,summary,caption,td,th,li,legend,output,.wordmark,.workspace-nav a){color:var(--onesa-text)}
+.operator-shell :where(h1,h2,h3,p,label,dt,dd,summary,caption,td,th,li,legend,output,.wordmark,.workspace-nav a,.nvidia-attribution a){color:var(--onesa-text)}
 .operator-shell :where(.scope-note,.field-help,.inspection-scene figcaption,.inspection-history span,.skill-grid article>p,footer,footer a){color:var(--onesa-muted)}
 .operator-shell .step-complete{color:var(--onesa-accent)}
 }
 @media(prefers-color-scheme:dark){
-.operator-shell :where(h1,h2,h3,p,label,dt,dd,summary,caption,td,th,li,legend,output,.wordmark,.workspace-nav a){color:var(--onesa-text)}
+.operator-shell :where(h1,h2,h3,p,label,dt,dd,summary,caption,td,th,li,legend,output,.wordmark,.workspace-nav a,.nvidia-attribution a){color:var(--onesa-text)}
 .operator-shell :where(.scope-note,.field-help,.inspection-scene figcaption,.inspection-history span,.skill-grid article>p,footer,footer a){color:var(--onesa-muted)}
 .operator-shell .step-complete{color:var(--onesa-accent)}
 }
@@ -67,7 +67,9 @@ h1,h2,h3{font-weight:600;letter-spacing:-.035em;line-height:1.12}h1{font-size:cl
 
 .humanoid-plan-table{max-height:24rem;overflow:auto;margin-bottom:20px}.humanoid-plan-table table{width:100%;border-collapse:collapse}.humanoid-plan-table th,.humanoid-plan-table td{padding:8px;text-align:left;border-bottom:1px solid var(--onesa-border);overflow-wrap:anywhere}.humanoid-plan-table caption{text-align:left;padding-bottom:8px}
 /* A local visual reference never carries task or hardware authority. */
-.nvidia-library{margin-block:2rem;padding:clamp(1rem,3vw,1.5rem);border:1px solid var(--onesa-border);border-radius:1rem;background:var(--onesa-surface);min-width:0}
+.nvidia-library{margin-block:2rem;padding:clamp(1rem,3vw,1.5rem);border:1px solid var(--onesa-border);border-radius:1rem;background:var(--onesa-surface);color:var(--onesa-text);min-width:0}
+/* Keep foreground and background changes synchronous under reduced motion. */
+.nvidia-library,.nvidia-library *{transition-property:none}
 .nvidia-library h2{margin-block:0 .5rem}
 .nvidia-toolbar{display:flex;align-items:end;flex-wrap:wrap;gap:.75rem;margin-block:1rem}
 .nvidia-choice{flex:1 1 14rem;min-width:0}
