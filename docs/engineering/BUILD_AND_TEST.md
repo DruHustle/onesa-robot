@@ -1,5 +1,23 @@
 # Independent software builds and tests
 
+The NVIDIA reference-library build verifies all local GLBs, previews, source
+records and licenses against their manifest hashes and rejects external or active
+GLB resources. `tests/nvidia-assets.test.mjs` exercises actual asset integrity,
+altered-package refusal, bounded browser downloads, cancellation and the complete
+locally packaged Three.js import graph. Proxy tests check actual bytes/MIME types
+and retain unknown-path/traversal denial.
+
+`tests/browser/nvidia-library.spec.mjs` covers automatic loading, all three
+selections, system appearance and keyboard focus, narrow layouts and accessibility,
+failed/corrupt downloads, missing/lost graphics, explicit recovery, stale selection
+and sign-out cancellation. It checks that visual interaction issues no mission or
+control mutation and that independent Stop/sign-out remain usable. When WebGL is
+unavailable, the rendered-preview path remains required. Set
+`ROBOT_REQUIRE_WEBGL=true` only in an actual graphics-capable supplemental run to
+require successful rendering and recovery; this strengthens those assertions.
+Local supplemental browser versions never substitute for the three pinned CI
+engines or fresh source-bound hosted acceptance. No physical hardware is used.
+
 Legacy joint and inspection supervision now renews its heartbeat only after both
 status and owned history reads succeed and their simulation-only payloads validate.
 Failed, malformed, obsolete or interrupted reads cannot keep an unobserved task
