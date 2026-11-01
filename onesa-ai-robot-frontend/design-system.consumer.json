@@ -9,10 +9,10 @@
   "guide": "https://docs.engineering.onesa.eu/docs/architecture/ONESA_DESIGN_SYSTEM",
   "adoption": "Review the versioned owner artifact, verify SHA256, copy into this repository, test affected consumers, promote dev \u2192 staging \u2192 main. No sibling imports or mutable runtime dependency.",
   "applications": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "owner": "DruHustle/onesa-company-portal",
     "source": "onesa-company-portal-frontend/src/config/onesa-applications.json",
-    "sha256": "bd31d9bf95eb2ef20f220a12aad5caca36d781b181477a6aa799220f89d83de1",
+    "sha256": "0eeccc055f8d6df8662f0763453932e5d55dd5be9530a45a4cd863962f01e635",
     "local_artifacts": [
       "onesa-ai-robot-frontend/onesa-applications.json"
     ]
@@ -25,7 +25,7 @@
     "producer": "scripts/generate_identity_icons.mjs",
     "product": "robot",
     "local_manifest": "onesa-ai-robot-frontend/public/brand/icons/v1/sources.json",
-    "local_manifest_sha256": "dc8417a04e8b0d0a1d9e49d26b99878190fca9d728e7b8a1afe1512e4d447dd1",
+    "local_manifest_sha256": "aa370de03fc62c9a85ab87e2aa3ef5b7c1e2c5a48ca9a3a67d38c557ca7122bc",
     "local_artifacts": [
       "onesa-ai-robot-frontend/public/brand/icons/v1/onesa-robot.svg",
       "onesa-ai-robot-frontend/public/brand/icons/v1/onesa-robot-16.png",

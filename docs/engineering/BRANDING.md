@@ -21,7 +21,15 @@ Both product and `/console` consume shared Onesa design artifact `1.0.0`, pinned
 `design-system.consumer.json`. A teal product accent identifies Robot; safety statuses
 use shared semantic roles and explicit text. The operator shell has protected,
 simulation and runtime-sourced deployment labels, stable units and observation times.
-Browser titles identify Onesa AI Robot independently of color.
+Browser titles identify Onesa Robot independently of color.
+
+The current source adopts the Company-owned applications artifact `1.0.1` with the
+product name **Onesa Robot**. Its navigation labels, public and console titles,
+development-privacy copy and SVG accessibility title use that same name. The owner
+icon generator's bounded `--titles-only` mode preserves the original mark, geometry,
+colors and every raster/ICO byte; the regenerated SVG and provenance hashes are
+deliberately copied and pinned here. Existing technical directory and resource names
+remain compatible. This source adoption requires its own hosted release acceptance.
 
 Appearance follows CSS `prefers-color-scheme`, with readable light fallback, dark
 roles, native controls, forced colors, reduced motion and print mappings. The previous
