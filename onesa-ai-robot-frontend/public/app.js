@@ -36,6 +36,12 @@ async function readPhysicalPermission(){
  finally{if(permissionRead===owner)permissionRead=null;}
 }
 function setAdministrator(session){administrator=session.role==='administrator';permissionRevision=null;permissionRead=null;lastPermissionRead=0;byId('administrator').hidden=!administrator;if(administrator)void readPhysicalPermission();}
+function verifiedObservation(status,tasks){
+ return status?.mode==='simulation'&&status.physical_actuation===false&&typeof status.stopped==='boolean'&&
+  Number.isFinite(status.position_radians)&&Number.isFinite(status.sampled_at)&&
+  (status.active_task===null||typeof status.active_task==='string')&&typeof status.capabilities?.edge_telemetry==='string'&&
+  Array.isArray(tasks)&&tasks.every(task=>typeof task?.id==='string'&&['proposed','running','completed','cancelled'].includes(task.state)&&typeof task.reason==='string'&&Number.isFinite(task.created)&&Number.isFinite(task.position));
+}
 async function refresh(force=true) {
   if(document.hidden||!force&&!fastPoll&&performance.now()-lastIdlePoll<3000)return;
   if(suspended || !csrf) return;
@@ -51,10 +57,14 @@ async function refresh(force=true) {
   owner.settled=new Promise(resolve=>{owner.finish=resolve;});
   polling=owner;const current=generation,revision=observationRevision,observations=[];
   try {
-    await client.heartbeat();
-    if(suspended || current!==generation || revision!==observationRevision) return;
     observations.push(client.status());observations.push(client.tasks());
     const [status,{tasks}]=await Promise.all(observations);
+    if(suspended || current!==generation || revision!==observationRevision) return;
+    if(!verifiedObservation(status,tasks))throw new Error('Simulator observation could not be verified.');
+    // A reachable heartbeat endpoint is not operator supervision. Renew only
+    // after both current reads succeed; failed or obsolete telemetry must let
+    // the independent backend watchdog stop an unobserved simulation.
+    await client.heartbeat();
     if(suspended || current!==generation || revision!==observationRevision) return;
     if(proposalId){const proposed=tasks.find(task=>task.id===proposalId);if(proposed&&proposed.state!=='proposed'){proposalId='';byId('approval-form').hidden=true;byId('approve-password').value='';}}
     fastPoll=Boolean(status.active_task)||Boolean(proposalId)||inspector.hasPending();
@@ -82,7 +92,8 @@ async function waitForSimulator() {
   notice('Checking simulator readiness… Your sign-in entries stay on this page.');
   while(!suspended && !lifecycle.aborted && performance.now()<deadline) {
     try {
-      const response=await fetch('/api/v1/ready',{credentials:'omit',cache:'no-store',signal:AbortSignal.any([lifecycle,AbortSignal.timeout(Math.ceil(Math.max(1,Math.min(4000,deadline-performance.now()))))])});
+      // A protected same-origin preview needs its access cookie before login.
+      const response=await fetch('/api/v1/ready',{credentials:'same-origin',cache:'no-store',signal:AbortSignal.any([lifecycle,AbortSignal.timeout(Math.ceil(Math.max(1,Math.min(4000,deadline-performance.now()))))])});
       if(response.ok) {
         let state;try{state=await response.json();}catch{throw new Error('Simulator readiness could not be verified. Try signing in after service recovery.');}
         if(state?.status==='ready'&&state.mode==='simulation'&&state.physical_actuation===false)return;

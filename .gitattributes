@@ -1,0 +1,4 @@
+# Preserve the exact bytes of the pinned NVIDIA reference derivatives and licenses.
+onesa-ai-robot-frontend/public/models/nvidia/** -text
+# The upstream CC BY license ends with a blank line; its exact hash is verified.
+onesa-ai-robot-frontend/public/models/nvidia/*/LICENSE.txt whitespace=-blank-at-eof

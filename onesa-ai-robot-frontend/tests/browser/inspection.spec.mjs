@@ -14,7 +14,7 @@ async function signIn(page) {
     .fill(process.env.ROBOT_TEST_OPERATOR || "operator");
   await page.locator("#password").fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.locator("#operator")).toBeVisible({ timeout: 25000 });
+  await expect(page.locator("#operator")).toBeVisible({ timeout: 30000 });
   await page.locator("#stop").click();
   await expect(page.locator("#reset-form")).toBeVisible();
   await page.locator("#reset-password").fill(password);

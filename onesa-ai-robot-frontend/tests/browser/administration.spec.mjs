@@ -16,7 +16,7 @@ async function fixture(page,role='administrator'){
    else if(path.endsWith('/allow')){const data=request.postDataJSON();expect(data).toEqual({password:'synthetic-confirmation',expected_revision:revision});allowed=true;revision++;body=state();}
    else if(path.endsWith('/block')){allowed=false;revision++;body=state();}
    else body=state();
-  }else if(path.endsWith('/status'))body={stopped:true,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
+  }else if(path.endsWith('/status'))body={mode:'simulation',physical_actuation:false,stopped:true,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
   else if(path.endsWith('/tasks'))body={tasks:[]};
   await route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
  });

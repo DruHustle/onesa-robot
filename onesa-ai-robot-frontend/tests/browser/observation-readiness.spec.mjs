@@ -8,7 +8,7 @@ test('simulation controls wait for a verified snapshot and stop remains availabl
   else if(path.endsWith('/status')||path.endsWith('/tasks')){
    if(!released)await initial;
    if(unavailable){status=503;body={detail:'Synthetic observation unavailable'};}
-   else body=path.endsWith('/tasks')?{tasks:[]}:{stopped,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
+   else body=path.endsWith('/tasks')?{tasks:[]}:{mode:'simulation',physical_actuation:false,stopped,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
   }else if(path.endsWith('/reset')){resets++;stopped=false;}
   else if(!path.endsWith('/heartbeat')){status=404;body={detail:'Unexpected fixture route'};}
   await route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});

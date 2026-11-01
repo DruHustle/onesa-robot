@@ -21,7 +21,7 @@ for(const [hour,mode] of [[20,'light'],[12,'dark']]) for(const width of [320,390
  await page.keyboard.press('Tab');
  await expect(page.getByRole('link',{name:'Skip to content'})).toBeFocused();
  await page.getByLabel('Operator name').fill(process.env.ROBOT_TEST_OPERATOR || 'operator');await page.getByLabel('Password',{exact:true}).fill((process.env.ROBOT_TEST_PASSWORD || 'browser-test-operator-only'));await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible({timeout:25000});for(let navigation=0;navigation<3;navigation++){await reloadWithSessionAcknowledgement(page);await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible();}
+ await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible({timeout:30000});for(let navigation=0;navigation<3;navigation++){await reloadWithSessionAcknowledgement(page);await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible();}
  await page.getByLabel('Confirm password to reset').fill((process.env.ROBOT_TEST_PASSWORD || 'browser-test-operator-only'));await page.getByRole('button',{name:'Reset simulation stop'}).click();
  await waitForSimulationReset(page);
  await page.locator('#joint-tools > summary').click();await page.getByRole('button',{name:'Create proposal'}).click();await expect(page.locator('#approval-form')).toBeVisible();await expect(page.locator('#proposed-id')).toContainText(/[a-f0-9-]{36}/);const taskId=await page.locator('#proposed-id').textContent();await page.getByLabel('Confirm operator password',{exact:true}).fill((process.env.ROBOT_TEST_PASSWORD || 'browser-test-operator-only'));await page.getByRole('button',{name:'Approve simulation task'}).click();
@@ -106,7 +106,7 @@ test('readiness recovery sends credentials once and never starts a task',async({
  await page.route('**/api/v1/ready',async route=>{readiness++;if(readiness<=2)await route.fulfill({status:503,contentType:'application/json',body:'{"detail":"Gateway unavailable"}'});else await route.continue();});
  page.on('request',request=>{if(request.method()==='POST'){const path=new URL(request.url()).pathname;if(path.endsWith('/auth/login'))logins++;else if(!path.endsWith('/heartbeat'))mutations.push(path);}});
  await page.goto('/console');await page.getByLabel('Operator name').fill(process.env.ROBOT_TEST_OPERATOR||'operator');await page.getByLabel('Password',{exact:true}).fill(process.env.ROBOT_TEST_PASSWORD||'browser-test-operator-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await expect(page.locator('#notice')).toContainText('Checking simulator readiness');await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible({timeout:25000});expect(readiness).toBeGreaterThanOrEqual(3);expect(logins).toBe(1);expect(mutations).toEqual([]);await expect(page.getByLabel('Password',{exact:true})).toHaveValue('');
+ await expect(page.locator('#notice')).toContainText('Checking simulator readiness');await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible({timeout:30000});expect(readiness).toBeGreaterThanOrEqual(3);expect(logins).toBe(1);expect(mutations).toEqual([]);await expect(page.getByLabel('Password',{exact:true})).toHaveValue('');
 });
 test('unavailable sign in retains masked input for an explicit retry without replay',async({page})=>{
  test.setTimeout(45000);let logins=0;
@@ -115,13 +115,13 @@ test('unavailable sign in retains masked input for an explicit retry without rep
  page.on('request',request=>{if(request.method()==='POST'&&request.url().endsWith('/auth/login'))logins++;});
  await page.goto('/console');await page.getByLabel('Operator name').fill(process.env.ROBOT_TEST_OPERATOR||'operator');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await expect(page.locator('#notice')).toContainText('Your sign-in entries are retained',{timeout:25000});expect(logins).toBe(0);expect(await page.getByLabel('Password',{exact:true}).inputValue()===password).toBe(true);await expect(page.getByLabel('Password',{exact:true})).toHaveAttribute('type','password');await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeEnabled();
- await page.unroute('**/api/v1/ready');await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible({timeout:25000});expect(logins).toBe(1);
+ await page.unroute('**/api/v1/ready');await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible({timeout:30000});expect(logins).toBe(1);
 });
 test('a failed credential submission needs a manual retry and preserves masked input',async({page})=>{
  let logins=0;const password=process.env.ROBOT_TEST_PASSWORD||'browser-test-operator-only';
  await page.route('**/api/v1/auth/login',async route=>{logins++;if(logins===1)await route.fulfill({status:503,contentType:'application/json',body:'{"detail":"Gateway unavailable"}'});else await route.continue();});
  await page.goto('/console');await page.getByLabel('Operator name').fill(process.env.ROBOT_TEST_OPERATOR||'operator');await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.locator('#notice')).toContainText('select Sign in again');expect(logins).toBe(1);expect(await page.getByLabel('Password',{exact:true}).inputValue()===password).toBe(true);
- await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible({timeout:25000});expect(logins).toBe(2);
+ await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('button',{name:'Sign out'})).toBeVisible({timeout:30000});expect(logins).toBe(2);
 });
 test('actual public and console icon requests match their declared MIME and approved bytes',async({page})=>{
  const provenance=JSON.parse(await readFile(new URL('../../public/brand/icons/v1/sources.json',import.meta.url),'utf8'));

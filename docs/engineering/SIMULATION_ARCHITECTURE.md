@@ -1,5 +1,28 @@
 # Software simulation architecture
 
+## NVIDIA visual reference library — source development
+
+The authenticated operator workspace includes three static NVIDIA SimReady
+derivatives: transfer conveyor, mobile cart and warehouse rack, from the pinned
+CC BY 4.0 source revision recorded in the frontend's asset manifest. Each is an
+independently copied local GLB with its rendered preview, original license and
+conversion provenance. The UI credits NVIDIA and Onesa's browser adaptation.
+
+The library automatically starts when visible to a signed-in operator. The
+renderer uses bounded, cancellable downloads, SHA256 validation and a static-only
+GLB profile without external resources, animation or skinning. Old selections and
+signed-out generations cannot install a late model. GPU resources are disposed
+on replacement or departure; rendering occurs on interaction/resize/theme changes,
+not a continuous animation loop. Unsupported or interrupted WebGL and network or
+integrity failures retain the preview and source links with an explicit retry.
+
+This library has no operator API client, task proposal, heartbeat, sensor stream
+or physical driver. Its source dimensions are visual reference values, not a
+commissioned machine envelope. The existing inspection/humanoid simulation,
+Stop/reset/approval authority and hardware-disabled boundary remain independent.
+It is not a rigid-body environment, perception model or hardware qualification.
+Hosted acceptance remains a separate release gate.
+
 ## Full-body humanoid reference — source development
 
 The protected console also exposes `onesa-humanoid-33-v1`: a connected pelvis-rooted
