@@ -1,9 +1,9 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "applications": [
     {"id": "company", "label": "Onesa UG", "href": "https://onesa.eu"},
     {"id": "ai", "label": "Onesa AI Platform", "href": "https://platform.onesa.eu"},
-    {"id": "robot", "label": "Onesa AI Robot", "href": "https://robot.onesa.eu"},
+    {"id": "robot", "label": "Onesa Robot", "href": "https://robot.onesa.eu"},
     {"id": "docs", "label": "Onesa Developer Docs", "href": "https://docs.onesa.eu"}
   ]
 }
