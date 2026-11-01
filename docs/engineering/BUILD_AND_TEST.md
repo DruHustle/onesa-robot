@@ -8,12 +8,16 @@ locally packaged Three.js import graph. Proxy tests check actual bytes/MIME type
 and retain unknown-path/traversal denial.
 Fixed local reference requests retain same-origin preview cookies and reject
 redirects. The protected-preview browser fixture requires a synthetic HttpOnly
-cookie for model bytes, proves that a static 401 does not sign out the operator,
+cookie at an actual loopback HTTP server, proves that a static 401 does not sign
+out the operator,
 then requires actual rendering after access is established. It also checks that
-a model redirect never reaches a foreign fixture origin, without sending external
-requests or performing control writes.
+a model redirect reaches neither a same-origin target nor a foreign loopback fixture,
+without sending external requests or performing control writes. This observes
+headers on the wire instead of inspecting a Playwright route before the browser's
+network stack attaches cookies; redirects are real HTTP responses in every engine.
 The sign-in readiness request also retains same-origin preview access. Its fixture
-requires a synthetic HttpOnly cookie before one deliberate credential submission;
+requires that cookie at the loopback HTTP server before one deliberate credential
+submission;
 existing bounded readiness, no-replay and sign-in input-preservation checks remain.
 
 `tests/browser/nvidia-library.spec.mjs` covers automatic loading, all three
@@ -208,8 +212,10 @@ record actual acknowledgement duration without credentials. The three-engine
 refuses failed HTTP, wrong state, physical activation, missing fields and unknown
 operations. The observer submits no retry and grants no release authority.
 
-`tests/browser/sign-in-readiness.spec.mjs` intercepts every API request with synthetic
-responses. It holds readiness unavailable beyond five seconds, verifies that no
+`tests/browser/sign-in-readiness.spec.mjs` uses only synthetic API responses; the
+preview-cookie case observes readiness at its isolated loopback server, while the
+timing cases intercept all API requests. It holds readiness unavailable beyond five
+seconds, verifies that no
 credentials are sent, then permits readiness and requires one login, cleared password
 input and zero task/control mutations. Its local three-engine result does not replace
 source-bound hosted qualification or authorize retrying a failed context.

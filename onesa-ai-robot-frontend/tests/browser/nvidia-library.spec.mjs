@@ -1,7 +1,8 @@
 import {test, expect} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import {loopbackFrontend} from './loopback-frontend.mjs';
 
-async function fixture(page, authenticated = true) {
+async function fixture(page, authenticated = true, origin = '') {
   const mutations = [], errors = [], models = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => {if (request.url().endsWith('.glb')) models.push(request.url());});
@@ -21,7 +22,7 @@ async function fixture(page, authenticated = true) {
     else if (path.endsWith('/ready')) body = {status:'ready'};
     await route.fulfill({status, contentType:'application/json', body:JSON.stringify(body)});
   });
-  await page.goto('/console');
+  await page.goto(origin + '/console');
   if (authenticated) {
     await expect(page.getByRole('button', {name:'Sign out', exact:true})).toBeVisible();
     await page.locator('#nvidia-library').scrollIntoViewIfNeeded();
@@ -87,40 +88,65 @@ test('failed and corrupted downloads retain a visible preview and explicit retry
   expect(state.mutations).toEqual([]); expect(state.errors).toEqual([]);
 });
 
-test('protected previews use their same-origin cookie and refuse model redirects', async ({page}) => {
-  const foreign = 'https://nvidia-preview-fixture.invalid';
-  let denied = 0, accepted = 0, foreignRequests = 0, redirect = false;
-  page.on('request', request => {if (request.url().startsWith(foreign + '/')) foreignRequests++;});
-  await page.route('**/*.glb', async route => {
-    const headers = await route.request().allHeaders();
-    if (!(headers.cookie ?? '').split(';').some(value => value.trim() === 'nvidia_preview_access=synthetic-only')) {
-      denied++;
-      await route.fulfill({status:401, body:'Synthetic protected preview'});
-    } else {
-      accepted++;
-      if (redirect) await route.fulfill({status:302, headers:{location:foreign + '/unexpected.glb'}, body:''});
-      else await route.continue();
-    }
+test('protected previews use their same-origin cookie and refuse model redirects', async ({page, baseURL}) => {
+  let denied = 0, accepted = 0, redirected = 0, foreignRequests = 0, foreignReceived = 0, redirect = '';
+  const foreign = await loopbackFrontend(baseURL, (_request, response) => {
+    foreignReceived++;
+    response.writeHead(200, {'Access-Control-Allow-Origin':'*'}).end('Unexpected synthetic redirect');
+    return true;
   });
-  // Any erroneous redirect remains in this synthetic test; no external request is sent.
-  await page.route(foreign + '/**', route => route.fulfill({status:200, body:'Unexpected synthetic redirect'}));
-  const state = await fixture(page);
-  await expect(page.locator('#nvidia-library')).toHaveAttribute('data-view-state','fallback');
-  expect(denied).toBe(1);
-  await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
-  await page.context().addCookies([{name:'nvidia_preview_access',value:'synthetic-only',url:new URL(page.url()).origin,httpOnly:true,sameSite:'Lax'}]);
-  await page.locator('#nvidia-retry').click();
-  await settled(page);
-  expect(accepted).toBe(1);
-  redirect = true;
-  await page.locator('#nvidia-select').selectOption('nvidia-mobile-cart');
-  await expect(page.locator('#nvidia-library')).toHaveAttribute('data-view-state','fallback');
-  expect(foreignRequests).toBe(0);
-  redirect = false;
-  await page.locator('#nvidia-retry').click();
-  await settled(page);
-  expect(denied).toBe(1);
-  expect(state.mutations).toEqual([]); expect(state.errors).toEqual([]);
+  let server;
+  try {
+    server = await loopbackFrontend(baseURL, (request, response) => {
+      if (request.url === '/unexpected-redirect.glb') {
+        redirected++;
+        response.writeHead(200).end('Unexpected same-origin redirect');
+        return true;
+      }
+      if (!request.url?.startsWith('/models/nvidia/') || !request.url.endsWith('.glb')) return false;
+      expect(request.method).toBe('GET');
+      expect(request.headers.authorization).toBeUndefined();
+      if (!(request.headers.cookie ?? '').split(';').some(value => value.trim() === 'nvidia_preview_access=synthetic-only')) {
+        denied++;
+        response.writeHead(401, {'Cache-Control':'no-store'}).end('Synthetic protected preview');
+        return true;
+      }
+      accepted++;
+      if (redirect) {
+        response.writeHead(302, {'Location':redirect, 'Cache-Control':'no-store'}).end();
+        return true;
+      }
+      return false;
+    });
+    page.on('request', request => {if (request.url().startsWith(foreign.origin + '/')) foreignRequests++;});
+    const state = await fixture(page, true, server.origin);
+    await expect(page.locator('#nvidia-library')).toHaveAttribute('data-view-state','fallback');
+    expect(denied).toBe(1);
+    await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
+    await page.context().addCookies([{name:'nvidia_preview_access',value:'synthetic-only',url:server.origin,httpOnly:true,sameSite:'Lax'}]);
+    expect(await page.evaluate(() => document.cookie.includes('nvidia_preview_access'))).toBe(false);
+    await page.locator('#nvidia-retry').click();
+    await settled(page);
+    expect(accepted).toBe(1);
+    // A same-origin target proves redirect:error independently of the app's CSP.
+    for (const [id, location] of [['nvidia-mobile-cart', server.origin + '/unexpected-redirect.glb'], ['nvidia-storage-rack', foreign.origin + '/unexpected.glb']]) {
+      redirect = location;
+      await page.locator('#nvidia-select').selectOption(id);
+      await expect(page.locator('#nvidia-library')).toHaveAttribute('data-view-state','fallback');
+      expect(redirected).toBe(0);
+      expect(foreignRequests).toBe(0);
+      expect(foreignReceived).toBe(0);
+      redirect = '';
+      await page.locator('#nvidia-retry').click();
+      await settled(page);
+    }
+    expect(denied).toBe(1); expect(accepted).toBe(5);
+    expect(state.mutations).toEqual([]); expect(state.errors).toEqual([]);
+    expect(server.errors).toEqual([]); expect(foreign.errors).toEqual([]);
+  } finally {
+    await server?.close();
+    await foreign.close();
+  }
 });
 
 test('missing WebGL shows the model preview without interfering with Stop or sign-out', async ({page}) => {
