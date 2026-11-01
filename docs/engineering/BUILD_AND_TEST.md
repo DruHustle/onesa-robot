@@ -15,6 +15,10 @@ a model redirect reaches neither a same-origin target nor a foreign loopback fix
 without sending external requests or performing control writes. This observes
 headers on the wire instead of inspecting a Playwright route before the browser's
 network stack attaches cookies; redirects are real HTTP responses in every engine.
+In the deliberate-redirect case only, WebKit's complete page-error list must equal
+the two exact model-URL refusal diagnostics recorded after the fixture sends each
+302. Other engines require no page errors. Extra, duplicate, unrelated or differently
+worded errors fail; all wire-target, rendering/recovery and no-write assertions remain.
 The sign-in readiness request also retains same-origin preview access. Its fixture
 requires that cookie at the loopback HTTP server before one deliberate credential
 submission;

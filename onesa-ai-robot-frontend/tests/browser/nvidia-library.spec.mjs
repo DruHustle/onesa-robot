@@ -88,8 +88,9 @@ test('failed and corrupted downloads retain a visible preview and explicit retry
   expect(state.mutations).toEqual([]); expect(state.errors).toEqual([]);
 });
 
-test('protected previews use their same-origin cookie and refuse model redirects', async ({page, baseURL}) => {
+test('protected previews use their same-origin cookie and refuse model redirects', async ({page, baseURL, browserName}) => {
   let denied = 0, accepted = 0, redirected = 0, foreignRequests = 0, foreignReceived = 0, redirect = '';
+  const expectedRedirectErrors = [];
   const foreign = await loopbackFrontend(baseURL, (_request, response) => {
     foreignReceived++;
     response.writeHead(200, {'Access-Control-Allow-Origin':'*'}).end('Unexpected synthetic redirect');
@@ -114,6 +115,12 @@ test('protected previews use their same-origin cookie and refuse model redirects
       accepted++;
       if (redirect) {
         response.writeHead(302, {'Location':redirect, 'Cache-Control':'no-store'}).end();
+        if (browserName === 'webkit') {
+          // WebKit reports the deliberately refused fetch as a page error.
+          // Pinned Playwright splits its text at the first colon (in http:).
+          const text = `Fetch API cannot load ${server.origin}${request.url} due to access control checks.`;
+          expectedRedirectErrors.push(text.slice(text.indexOf(':') + 2));
+        }
         return true;
       }
       return false;
@@ -141,7 +148,8 @@ test('protected previews use their same-origin cookie and refuse model redirects
       await settled(page);
     }
     expect(denied).toBe(1); expect(accepted).toBe(5);
-    expect(state.mutations).toEqual([]); expect(state.errors).toEqual([]);
+    expect(expectedRedirectErrors).toHaveLength(browserName === 'webkit' ? 2 : 0);
+    expect(state.mutations).toEqual([]); expect(state.errors).toEqual(expectedRedirectErrors);
     expect(server.errors).toEqual([]); expect(foreign.errors).toEqual([]);
   } finally {
     await server?.close();
