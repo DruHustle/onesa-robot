@@ -6,6 +6,15 @@ GLB resources. `tests/nvidia-assets.test.mjs` exercises actual asset integrity,
 altered-package refusal, bounded browser downloads, cancellation and the complete
 locally packaged Three.js import graph. Proxy tests check actual bytes/MIME types
 and retain unknown-path/traversal denial.
+Fixed local reference requests retain same-origin preview cookies and reject
+redirects. The protected-preview browser fixture requires a synthetic HttpOnly
+cookie for model bytes, proves that a static 401 does not sign out the operator,
+then requires actual rendering after access is established. It also checks that
+a model redirect never reaches a foreign fixture origin, without sending external
+requests or performing control writes.
+The sign-in readiness request also retains same-origin preview access. Its fixture
+requires a synthetic HttpOnly cookie before one deliberate credential submission;
+existing bounded readiness, no-replay and sign-in input-preservation checks remain.
 
 `tests/browser/nvidia-library.spec.mjs` covers automatic loading, all three
 selections, system appearance and keyboard focus, narrow layouts and accessibility,

@@ -25,7 +25,9 @@ export function validateStaticGlb(buffer) {
 
 export async function fetchReference(asset, signal) {
   const path = `/models/nvidia/${asset.glb.path}`;
-  const response = await fetch(path, {signal, credentials:'omit', redirect:'error'});
+  // Keep an authenticated preview's host-scoped cookie on this fixed local path.
+  // Same-origin mode and redirect refusal never forward it to a foreign asset host.
+  const response = await fetch(path, {signal, credentials:'same-origin', redirect:'error'});
   if (!response.ok) throw new Error('Reference download failed');
   const declared = response.headers.get('content-length');
   if (declared !== null && Number(declared) > asset.glb.byteLength) throw new Error('Reference exceeds its reviewed size');

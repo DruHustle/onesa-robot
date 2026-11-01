@@ -87,6 +87,42 @@ test('failed and corrupted downloads retain a visible preview and explicit retry
   expect(state.mutations).toEqual([]); expect(state.errors).toEqual([]);
 });
 
+test('protected previews use their same-origin cookie and refuse model redirects', async ({page}) => {
+  const foreign = 'https://nvidia-preview-fixture.invalid';
+  let denied = 0, accepted = 0, foreignRequests = 0, redirect = false;
+  page.on('request', request => {if (request.url().startsWith(foreign + '/')) foreignRequests++;});
+  await page.route('**/*.glb', async route => {
+    const headers = await route.request().allHeaders();
+    if (!(headers.cookie ?? '').split(';').some(value => value.trim() === 'nvidia_preview_access=synthetic-only')) {
+      denied++;
+      await route.fulfill({status:401, body:'Synthetic protected preview'});
+    } else {
+      accepted++;
+      if (redirect) await route.fulfill({status:302, headers:{location:foreign + '/unexpected.glb'}, body:''});
+      else await route.continue();
+    }
+  });
+  // Any erroneous redirect remains in this synthetic test; no external request is sent.
+  await page.route(foreign + '/**', route => route.fulfill({status:200, body:'Unexpected synthetic redirect'}));
+  const state = await fixture(page);
+  await expect(page.locator('#nvidia-library')).toHaveAttribute('data-view-state','fallback');
+  expect(denied).toBe(1);
+  await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
+  await page.context().addCookies([{name:'nvidia_preview_access',value:'synthetic-only',url:new URL(page.url()).origin,httpOnly:true,sameSite:'Lax'}]);
+  await page.locator('#nvidia-retry').click();
+  await settled(page);
+  expect(accepted).toBe(1);
+  redirect = true;
+  await page.locator('#nvidia-select').selectOption('nvidia-mobile-cart');
+  await expect(page.locator('#nvidia-library')).toHaveAttribute('data-view-state','fallback');
+  expect(foreignRequests).toBe(0);
+  redirect = false;
+  await page.locator('#nvidia-retry').click();
+  await settled(page);
+  expect(denied).toBe(1);
+  expect(state.mutations).toEqual([]); expect(state.errors).toEqual([]);
+});
+
 test('missing WebGL shows the model preview without interfering with Stop or sign-out', async ({page}) => {
   await page.addInitScript(() => {
     const original = HTMLCanvasElement.prototype.getContext;

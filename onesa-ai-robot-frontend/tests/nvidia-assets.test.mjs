@@ -41,7 +41,7 @@ test('packaging rejects altered local model bytes before producing a release', a
   } finally {await rm(temporary, {recursive:true, force:true});}
 });
 
-test('verified browser downloads omit credentials and enforce byte count, hash and cancellation', async () => {
+test('verified browser downloads scope credentials to the same origin and enforce byte count, hash and cancellation', async () => {
   const original = globalThis.fetch;
   const catalog = await verifyAssets(), asset = catalog.assets[1];
   const bytes = await readFile('public/models/nvidia/' + asset.glb.path);
@@ -51,7 +51,7 @@ test('verified browser downloads omit credentials and enforce byte count, hash a
     const controller = new AbortController();
     assert.equal((await fetchReference(asset, controller.signal)).byteLength, bytes.length);
     assert.equal(request.path, '/models/nvidia/' + asset.glb.path);
-    assert.equal(request.options.credentials, 'omit'); assert.equal(request.options.redirect, 'error');
+    assert.equal(request.options.credentials, 'same-origin'); assert.equal(request.options.redirect, 'error');
     globalThis.fetch = async () => new Response(bytes.subarray(0, bytes.length - 1));
     await assert.rejects(fetchReference(asset, controller.signal), /incomplete/);
     globalThis.fetch = async () => new Response(Buffer.concat([bytes, Buffer.of(0)]));
