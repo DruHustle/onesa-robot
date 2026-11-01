@@ -92,7 +92,8 @@ async function waitForSimulator() {
   notice('Checking simulator readiness… Your sign-in entries stay on this page.');
   while(!suspended && !lifecycle.aborted && performance.now()<deadline) {
     try {
-      const response=await fetch('/api/v1/ready',{credentials:'omit',cache:'no-store',signal:AbortSignal.any([lifecycle,AbortSignal.timeout(Math.ceil(Math.max(1,Math.min(4000,deadline-performance.now()))))])});
+      // A protected same-origin preview needs its access cookie before login.
+      const response=await fetch('/api/v1/ready',{credentials:'same-origin',cache:'no-store',signal:AbortSignal.any([lifecycle,AbortSignal.timeout(Math.ceil(Math.max(1,Math.min(4000,deadline-performance.now()))))])});
       if(response.ok) {
         let state;try{state=await response.json();}catch{throw new Error('Simulator readiness could not be verified. Try signing in after service recovery.');}
         if(state?.status==='ready'&&state.mode==='simulation'&&state.physical_actuation===false)return;

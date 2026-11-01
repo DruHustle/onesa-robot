@@ -72,6 +72,17 @@ test('proxy preserves auth boundaries, strips unrelated secrets and rejects open
     assert.deepEqual(Buffer.from(await image.arrayBuffer()),await readFile('dist/images/robot-workspace-example-'+mode+'.png'));
   }
   assert.equal((await fetch('http://127.0.0.1:3439/images/robot-workspace-example-private.png')).status,404);
+  const catalog=JSON.parse(await readFile('dist/models/nvidia/manifest.json','utf8'));
+  for(const asset of catalog.assets){
+    for(const [file,type] of [[asset.glb,'model/gltf-binary'],[asset.thumbnail,'image/png'],[asset.licenseFile,'text/plain; charset=utf-8'],[asset.sourceFile,'application/json']]){
+      const model=await fetch('http://127.0.0.1:3439/models/nvidia/'+file.path);
+      assert.equal(model.status,200);assert.equal(model.headers.get('content-type'),type);
+      if(file.path.endsWith('.glb'))assert.equal(model.headers.get('cache-control'),'public, max-age=31536000, immutable');
+      assert.deepEqual(Buffer.from(await model.arrayBuffer()),await readFile('dist/models/nvidia/'+file.path));
+    }
+  }
+  for(const path of ['/vendor/three/GLTFLoader.js','/vendor/three/SkeletonUtils.js','/nvidia-library.js','/nvidia-catalog.js'])assert.equal((await fetch('http://127.0.0.1:3439'+path)).status,200);
+  for(const path of ['/models/nvidia/private.glb','/models/nvidia/../../.env','/vendor/three/../../.env','/models%2fnvidia/private.glb'])assert.equal((await fetch('http://127.0.0.1:3439'+path)).status,404);
   for(const path of ['/images/robot-concept-999.webp','/images/../.env','/images%2frobot-concept-640.webp','/images/robot-concept-640.webp/..%2f..%2f.env'])assert.equal((await fetch('http://127.0.0.1:3439'+path)).status,404);
   assert.equal((await fetch('http://127.0.0.1:3439/')).headers.get('content-security-policy').includes("frame-ancestors 'none'"),true);
  } finally {child.kill('SIGTERM');await new Promise(resolve=>child.once('exit',resolve));await new Promise(resolve=>upstream.close(resolve));}

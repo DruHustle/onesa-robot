@@ -150,6 +150,7 @@ jobs:
     - name: Synthetic cross-browser operator acceptance
       env:
         DEBUG: pw:browser
+        ROBOT_REQUIRE_WEBGL: 'true'
         ROBOT_DATABASE_PATH: /tmp/robot-browser-test.sqlite3
         ROBOT_PUBLIC_ORIGIN: http://localhost:3431
       run: "ROBOT_OPERATOR_PASSWORD_HASH=$(cd onesa-ai-robot-backend && python -c \"from robot_api.security import password_hash;\
@@ -158,7 +159,7 @@ jobs:
         \ > /tmp/robot-frontend-test.log 2>&1 &\nfrontend_pid=$!\ntrap 'kill \"$backend_pid\" \"$frontend_pid\" 2>/dev/null\
         \ || true' EXIT\nfor attempt in $(seq 1 30); do\n  if curl -fsS http://localhost:3431/api/v1/ready > /dev/null; then\
         \ break; fi\n  echo \"Waiting for Robot readiness: $attempt\"\n  sleep 1\ndone\ncurl -fsS http://localhost:3431/api/v1/ready\
-        \ > /dev/null\nnpm --prefix onesa-ai-robot-frontend run test:e2e\n"
+        \ > /dev/null\nxvfb-run -a --server-args='-screen 0 1920x1080x24' npm --prefix onesa-ai-robot-frontend run test:e2e\n"
     - name: Retain sanitized synthetic browser outcomes
       id: browser_diagnostics
       if: ${{ always() }}

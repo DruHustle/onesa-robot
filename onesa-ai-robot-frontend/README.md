@@ -27,9 +27,10 @@ build verifies its digest; the engineering manifest is an identical reviewed cop
 `npm run test:e2e` requires an isolated simulator, synthetic operator
 `browser-test-operator-only`, and matching installed Chromium/Firefox/WebKit binaries.
 The suite checks five viewport widths, keyboard entry, login/reset/proposal/approval/
-completion/stop/logout and automated WCAG rules. The current matrix has 48 cases per
-browser (144 total), including a test-owned held-response fixture that verifies
-independent Stop/Sign out and originating-form duplicate suppression. Four offline
+completion/stop/logout and automated WCAG rules. Enumerate the current matrix with
+`npm run test:e2e -- --list`; all three browser engines remain required. A
+test-owned held-response fixture verifies independent Stop/Sign out and
+originating-form duplicate suppression. Four offline
 module regressions also exercise Stop, cancel, logout and duplicate submission.
 Manual accessibility acceptance
 remains separate. Do not use a real operator password or live hardware for tests.
@@ -54,3 +55,21 @@ not a physics engine or perception model. Native scenario data is explicitly
 synthetic. Optional file-import availability comes from authenticated runtime
 configuration; ordinary AI accounts receive no Robot permission. Active/pending
 polling is500ms, idle polling3s, and hidden pages suspend requests and replay.
+
+The operator workspace also contains three locally packaged NVIDIA SimReady
+reference models: transfer conveyor, mobile cart and warehouse rack. They load
+automatically as the signed-in operator reaches the library. A rendered preview
+remains available during loading or unsupported graphics, with an explicit retry.
+Selection cancels old downloads, and sign-out disposes pending and GPU resources.
+No continuous rotation, model service or third-party CDN is required. Mouse, touch,
+focused arrow keys and Fit view provide inspection controls; browser/system
+appearance changes preserve the selected model and operator session.
+
+The build checks every model, preview, source record and license against the local
+manifest. The browser bounds each GLB download, checks SHA256 and rejects external
+resources or active model features before parsing. Three.js 0.186.1 is locked and
+packaged from the installed MIT-licensed distribution; engines and assets remain
+inside this independent frontend build. See [third-party notices](THIRD_PARTY_NOTICES.md).
+These are static visual references. They add no physical behavior, sensing,
+collision qualification, robot articulation or actuator authority. Inspection
+plans and the 33-axis humanoid keep their existing simulation and safety controls.
