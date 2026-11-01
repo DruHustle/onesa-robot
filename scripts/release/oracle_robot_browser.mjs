@@ -76,7 +76,9 @@ for(const [engine,type] of Object.entries(engines)){
    await page.locator('#name').fill(request.credentials.operator);
    await page.locator('#password').fill(request.credentials.password);
    await page.getByRole('button',{name:'Sign in',exact:true}).click();
-   await expect(page.locator('#operator')).toBeVisible({timeout:25000});
+   // Observe the existing 20s readiness plus 10s credential-request budget.
+   // This remains one submission; application and safety deadlines are unchanged.
+   await expect(page.locator('#operator')).toBeVisible({timeout:30000});
   }finally{write(engine+'-sign-in-transport.json',signInTransport());}
   if(request.read_only && request.binding.component==='frontend'){
    await expect(page.locator('#mission-form')).toBeVisible();

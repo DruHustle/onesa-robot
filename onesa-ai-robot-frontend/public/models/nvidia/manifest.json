@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "catalogId": "onesa-nvidia-simready-reference-v1",
+  "assets": [
+    {
+      "id": "nvidia-transfer-conveyor",
+      "name": "Transfer conveyor",
+      "kind": "conveyor",
+      "author": "NVIDIA",
+      "sourceAssetId": "conveyor_belt_a61",
+      "sourceRevision": "4763fbfaa4f8e97658e68b57d01b4c86659e08b5",
+      "sourceUrl": "https://huggingface.co/datasets/nvidia/simready-assets/tree/4763fbfaa4f8e97658e68b57d01b4c86659e08b5/conveyor_belt_a61",
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution": "Transfer conveyor by NVIDIA, from nvidia/simready-assets, CC BY 4.0. Converted and optimized for browser viewing by Onesa UG; geometry simplified and materials adapted.",
+      "glb": {
+        "path": "nvidia-transfer-conveyor/compact.3f73d759f3f6f233.glb",
+        "sha256": "3f73d759f3f6f233d5b3196951bf1ade77e163c14576bccdceddebe9e3ebe0f0",
+        "byteLength": 1586780
+      },
+      "thumbnail": {
+        "path": "nvidia-transfer-conveyor/preview.png",
+        "sha256": "920b611de2d96aac5af92e80f2352eda64417abd4a940ac44314de8e8857489a",
+        "byteLength": 199106
+      },
+      "licenseFile": {
+        "path": "nvidia-transfer-conveyor/LICENSE.txt",
+        "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+        "byteLength": 18657
+      },
+      "sourceFile": {
+        "path": "nvidia-transfer-conveyor/SOURCE.json",
+        "sha256": "fba81e42e2156c0c6359b689685e4161d0fcd6891517853131bda7971011d4be",
+        "byteLength": 100437
+      },
+      "unit": "m",
+      "upAxis": "Y",
+      "triangles": 29057,
+      "visualOnly": true
+    },
+    {
+      "id": "nvidia-mobile-cart",
+      "name": "Mobile cart",
+      "kind": "cart",
+      "author": "NVIDIA",
+      "sourceAssetId": "cart_mobile_e01",
+      "sourceRevision": "4763fbfaa4f8e97658e68b57d01b4c86659e08b5",
+      "sourceUrl": "https://huggingface.co/datasets/nvidia/simready-assets/tree/4763fbfaa4f8e97658e68b57d01b4c86659e08b5/cart_mobile_e01",
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution": "Mobile cart by NVIDIA, from nvidia/simready-assets, CC BY 4.0. Converted and optimized for browser viewing by Onesa UG; geometry simplified and materials adapted.",
+      "glb": {
+        "path": "nvidia-mobile-cart/compact.1c37d2744f64601c.glb",
+        "sha256": "1c37d2744f64601cfa948712dacd788d82c2552233cd368bdc6c918024cdb650",
+        "byteLength": 846516
+      },
+      "thumbnail": {
+        "path": "nvidia-mobile-cart/preview.png",
+        "sha256": "ac0ddd7a8e55b0aef5202695f6fcc9f04e175a6014856bd0428c1d6427a7b548",
+        "byteLength": 214709
+      },
+      "licenseFile": {
+        "path": "nvidia-mobile-cart/LICENSE.txt",
+        "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+        "byteLength": 18657
+      },
+      "sourceFile": {
+        "path": "nvidia-mobile-cart/SOURCE.json",
+        "sha256": "407523d1c8148e389a4ba3f7222284b02f03dc4bfc9d0e3914b8f46672d425ca",
+        "byteLength": 31546
+      },
+      "unit": "m",
+      "upAxis": "Y",
+      "triangles": 29094,
+      "visualOnly": true
+    },
+    {
+      "id": "nvidia-storage-rack",
+      "name": "Warehouse rack",
+      "kind": "rack",
+      "author": "NVIDIA",
+      "sourceAssetId": "rack_long_empty_a01",
+      "sourceRevision": "4763fbfaa4f8e97658e68b57d01b4c86659e08b5",
+      "sourceUrl": "https://huggingface.co/datasets/nvidia/simready-assets/tree/4763fbfaa4f8e97658e68b57d01b4c86659e08b5/rack_long_empty_a01",
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution": "Warehouse rack by NVIDIA, from nvidia/simready-assets, CC BY 4.0. Converted and optimized for browser viewing by Onesa UG; geometry simplified and materials adapted.",
+      "glb": {
+        "path": "nvidia-storage-rack/compact.f62735d8355b5244.glb",
+        "sha256": "f62735d8355b524467301bdecce77c31b84a303b2d9c31f457dcbff27e9d3e2e",
+        "byteLength": 1441336
+      },
+      "thumbnail": {
+        "path": "nvidia-storage-rack/preview.png",
+        "sha256": "e9fbeb5f7703672c038873b483d3a27425afb63128aae0037be9a7c4cdbc7f2b",
+        "byteLength": 196447
+      },
+      "licenseFile": {
+        "path": "nvidia-storage-rack/LICENSE.txt",
+        "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+        "byteLength": 18657
+      },
+      "sourceFile": {
+        "path": "nvidia-storage-rack/SOURCE.json",
+        "sha256": "4f904098dc31c2344123ee691d956e7812d5512175546fb8dc1fbe6e3e61d547",
+        "byteLength": 12404
+      },
+      "unit": "m",
+      "upAxis": "Y",
+      "triangles": 29100,
+      "visualOnly": true
+    }
+  ],
+  "limitations": [
+    "Visual reference geometry only; physical behavior, robot articulation, sensors and actuation are not validated or enabled.",
+    "NVIDIA attribution identifies the source and does not imply endorsement."
+  ]
+}

@@ -10,7 +10,7 @@ test('authenticated whole-body workflow crosses the real gateway and exports ref
  await page.getByLabel('Operator name').fill(process.env.ROBOT_TEST_OPERATOR||'operator');
  await page.getByLabel('Password',{exact:true}).fill(process.env.ROBOT_TEST_PASSWORD||'browser-test-operator-only');
  await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible({timeout:25000});
+ await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible({timeout:30000});
  // Establish this case's own stopped baseline even after a completed earlier run.
  const stopAcknowledgement=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/v1/stop'&&response.request().method()==='POST');
  await page.getByRole('button',{name:'Stop simulation',exact:true}).click();

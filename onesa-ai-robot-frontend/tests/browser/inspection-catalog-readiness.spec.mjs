@@ -2,21 +2,23 @@ import {test,expect} from '@playwright/test';
 
 // Intercepted timing fixture only; no hosted acceptance, operator account or command.
 const catalog={version:'1.0.0',mode:'simulation',physical_actuation:false,assets:[],robots:[{id:'synthetic-profile',name:'Synthetic test profile'}],skills:[],scenarios:[{id:'normal',label:'Synthetic normal scenario',source:'local timing fixture'}],asset_context_import:'disabled'};
-const snapshot={stopped:false,active_task:null,position_radians:0,sampled_at:1,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
+const snapshot={mode:'simulation',physical_actuation:false,stopped:false,active_task:null,position_radians:0,sampled_at:1,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
 
 async function controlCatalog(page,newer='held'){
  let releaseCatalog,releaseFuture,requested;
  const pendingCatalog=new Promise(resolve=>releaseCatalog=resolve),future=new Promise(resolve=>releaseFuture=resolve),catalogRequested=new Promise(resolve=>requested=resolve);
- let heartbeats=0;
+ const reads={status:0,tasks:0};
  await page.route('**/api/v1/**',async route=>{
   const path=new URL(route.request().url()).pathname;let status=200,body={};
   if(path.endsWith('/auth/me'))body={csrf:'synthetic-catalog-session',name:'synthetic-owner',role:'operator'};
-  else if(path.endsWith('/heartbeat')){
-   heartbeats++;
-   if(heartbeats>(newer==='held'?1:2))await future;
-  }else if(path.endsWith('/status')||path.endsWith('/tasks')){
-   if(heartbeats>=2&&newer==='unavailable'){status=503;body={detail:'Synthetic observation unavailable'};}
-   else body=path.endsWith('/tasks')?{tasks:[]}:{...snapshot,stopped:heartbeats>=2&&newer==='stopped'};
+  else if(path.endsWith('/heartbeat'))body={status:'received',physical_actuation:false};
+  else if(path.endsWith('/status')||path.endsWith('/tasks')){
+   // Control observation generations directly. Heartbeat follows a verified
+   // observation and must never be needed to advance this read-only fixture.
+   const operation=path.endsWith('/tasks')?'tasks':'status',generation=++reads[operation];
+   if(generation>(newer==='held'?1:2))await future;
+   if(generation>=2&&newer==='unavailable'){status=503;body={detail:'Synthetic observation unavailable'};}
+   else body=operation==='tasks'?{tasks:[]}:{...snapshot,stopped:generation>=2&&newer==='stopped'};
   }else if(path.endsWith('/missions/catalog')){requested();await pendingCatalog;body=catalog;}
   else if(path.endsWith('/missions'))body={missions:[]};
   else{status=404;body={detail:'Unexpected synthetic timing route'};}

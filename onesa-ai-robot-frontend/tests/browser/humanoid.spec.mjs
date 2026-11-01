@@ -31,7 +31,7 @@ async function fixture(page){
    expect(route.request().postDataJSON().command_id).toBe(active);heartbeats++;
    body={status:'received'};
   }else if(path.endsWith('/tasks'))body={tasks:[]};
-  else if(path.endsWith('/status'))body={stopped,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
+  else if(path.endsWith('/status'))body={mode:'simulation',physical_actuation:false,stopped,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
   else if(!path.endsWith('/heartbeat')){status=404;body={detail:'Unexpected fixture route'};}
   if(heldPath&&path.endsWith(heldPath)){
    entered++;

@@ -1,5 +1,72 @@
 # Independent software builds and tests
 
+The NVIDIA reference-library build verifies all local GLBs, previews, source
+records and licenses against their manifest hashes and rejects external or active
+GLB resources. `tests/nvidia-assets.test.mjs` exercises actual asset integrity,
+altered-package refusal, bounded browser downloads, cancellation and the complete
+locally packaged Three.js import graph. Proxy tests check actual bytes/MIME types
+and retain unknown-path/traversal denial.
+Fixed local reference requests retain same-origin preview cookies and reject
+redirects. The protected-preview browser fixture requires a synthetic HttpOnly
+cookie at an actual loopback HTTP server, proves that a static 401 does not sign
+out the operator,
+then requires actual rendering after access is established. It also checks that
+a model redirect reaches neither a same-origin target nor a foreign loopback fixture,
+without sending external requests or performing control writes. This observes
+headers on the wire instead of inspecting a Playwright route before the browser's
+network stack attaches cookies; redirects are real HTTP responses in every engine.
+In the deliberate-redirect case only, WebKit's complete page-error list must equal
+the two exact model-URL refusal diagnostics recorded after the fixture sends each
+302. Other engines require no page errors. Extra, duplicate, unrelated or differently
+worded errors fail; all wire-target, rendering/recovery and no-write assertions remain.
+The sign-in readiness request also retains same-origin preview access. Its fixture
+requires that cookie at the loopback HTTP server before one deliberate credential
+submission;
+existing bounded readiness, no-replay and sign-in input-preservation checks remain.
+
+`tests/browser/nvidia-library.spec.mjs` covers automatic loading, all three
+selections, system appearance and keyboard focus, narrow layouts and accessibility,
+failed/corrupt downloads, missing/lost graphics, explicit recovery, stale selection
+and sign-out cancellation. Source/license/provenance links resolve the active system
+foreground directly, with synchronous gallery colors under reduced motion; browser
+checks cover link colors after each theme change and accessibility in both modes.
+It checks that visual interaction issues no mission or
+control mutation and that independent Stop/sign-out remain usable. When WebGL is
+unavailable, the explicitly injected missing-graphics test still requires the preview.
+Native CI sets `ROBOT_REQUIRE_WEBGL=true` so every successful-load, selection and
+recovery flow requires actual rendering in all three engines. It runs the combined
+matrix under a disposable 1920×1080×24 Xvfb display and uses headed Firefox because
+the stock Linux headless Firefox profile disables WebGL 2. The single report keeps
+all engine outcomes, and no test is skipped or retried. The same environment setting
+can strengthen an actual graphics-capable supplemental run.
+Local supplemental browser versions never substitute for the three pinned CI
+engines or fresh source-bound hosted acceptance. No physical hardware is used.
+
+The disposable CI runner's Ubuntu source preparation retains its exact mirror
+allowlist, canonical HTTPS archive and signing/suite fields. Rejected sources report
+only bounded URI structure; credentials, arbitrary paths and query/fragment values
+stay redacted, including malformed Unicode parsing failures. Explicit zero ports
+and empty user information are rejected before any source file is rewritten.
+
+Legacy joint and inspection supervision now renews its heartbeat only after both
+status and owned history reads succeed and their simulation-only payloads validate.
+Failed, malformed, obsolete or interrupted reads cannot keep an unobserved task
+alive. The concurrency unit tests cover both read failures, invalid mode/actuation
+and task data, session replacement and post-action observation ownership. The
+three-engine `observation-supervision.spec.mjs` test starts a real synthetic task
+through the local gateway, fails each browser observation route in turn, and
+requires the actual backend watchdog to cancel it while heartbeat remains reachable.
+Stop and sign-out stay available. These source tests do not establish hosted
+acceptance or physical stopping performance.
+
+The contract toolchain independently packages a narrowly scoped callable adapter
+for `@redocly/openapi-core@1.34.20`, executing upstream `minimatch@11.0.1` to address
+[GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249).
+The exact archive, upstream integrity and license stay inside the frontend build
+context. Installed-consumer URL/header matching and contract generation are tested;
+the legacy matcher is absent and no broader tooling upgrade is included. Ordinary
+build, type, dependency-audit and source-bound release gates remain required.
+
 Independent frontend dependency tests retain separate staging and production API
 sources, verify the original accepted signed chain including its authorization
 decision, and require exact backend/edge/ROS bytes and modes, current image scans
@@ -122,11 +189,16 @@ normal application/provider TLS and proxy policy are unchanged.
 
 ## Bounded sign-in acceptance
 
-After submitting Sign in, browser scenarios use `waitForOperatorSignIn`: the same
-25-second acknowledgement bound already used by the main simulation journey.
-The application checks readiness for at most 15 seconds before its 10-second
-credential request. A default five-second assertion can expire before login starts.
-Ordinary layout, simulation, request and safety deadlines remain unchanged.
+After submitting Sign in, browser scenarios use `waitForOperatorSignIn` with a
+30-second acknowledgement bound matching the existing application budgets:
+20 seconds for readiness followed by a 10-second credential request. The former
+25-second observer still assumed an older 15-second readiness budget and could
+reject a valid delayed sign-in. A controlled three-engine fixture waits 19 seconds
+for readiness and 6.5 seconds for the one login response, requires successful
+sign-in with zero control mutations, and clears the masked password afterward.
+The owner observer uses the same 30-second sign-in observation budget without a
+retry or any new release authority. Ordinary layout, application, simulation,
+request and safety deadlines are unchanged.
 
 Reload and late-response regressions observe the existing session/logout HTTP
 acknowledgement within the client's existing 10-second request budget before
@@ -144,8 +216,10 @@ record actual acknowledgement duration without credentials. The three-engine
 refuses failed HTTP, wrong state, physical activation, missing fields and unknown
 operations. The observer submits no retry and grants no release authority.
 
-`tests/browser/sign-in-readiness.spec.mjs` intercepts every API request with synthetic
-responses. It holds readiness unavailable beyond five seconds, verifies that no
+`tests/browser/sign-in-readiness.spec.mjs` uses only synthetic API responses; the
+preview-cookie case observes readiness at its isolated loopback server, while the
+timing cases intercept all API requests. It holds readiness unavailable beyond five
+seconds, verifies that no
 credentials are sent, then permits readiness and requires one login, cleared password
 input and zero task/control mutations. Its local three-engine result does not replace
 source-bound hosted qualification or authorize retrying a failed context.

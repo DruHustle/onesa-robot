@@ -12,7 +12,7 @@ for(const accepted of [true,false])test(`initial anonymous lookup preserves entr
    logins++;expect(route.request().postDataJSON()).toEqual({name:'synthetic-owner',password:'synthetic-typed-before-lookup'});
    session=accepted;status=accepted?200:401;body=accepted?{csrf:'synthetic-csrf',name:'synthetic-owner',role:'operator'}:{detail:'Synthetic credentials rejected'};
   }else if(path==='/api/v1/auth/logout'){session=false;body={status:'signed_out',physical_actuation:false};}
-  else if(path==='/api/v1/status')body={stopped:true,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
+  else if(path==='/api/v1/status')body={mode:'simulation',physical_actuation:false,stopped:true,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
   else if(path==='/api/v1/tasks')body={tasks:[]};
   else if(path!=='/api/v1/heartbeat'){status=404;body={detail:'Unselected synthetic route'};}
   if(route.request().method()==='POST'&&!['/api/v1/auth/login','/api/v1/auth/logout','/api/v1/heartbeat'].includes(path))mutations.push(path);

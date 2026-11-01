@@ -12,7 +12,7 @@ test('late session restoration cannot erase a submitted sign-in during readiness
    loginRequests++;const input=route.request().postDataJSON();
    submittedIntact=input.name==='synthetic-owner'&&input.password==='synthetic-submission-only';
    status=submittedIntact?200:401;body=submittedIntact?{csrf:'synthetic-csrf',name:'synthetic-owner',role:'operator'}:{detail:'Synthetic credentials rejected'};
-  }else if(path==='/api/v1/status')body={stopped:true,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
+  }else if(path==='/api/v1/status')body={mode:'simulation',physical_actuation:false,stopped:true,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
   else if(path==='/api/v1/tasks')body={tasks:[]};
   else if(path!=='/api/v1/heartbeat'){status=404;body={detail:'Unselected synthetic route'};}
   await route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)});
