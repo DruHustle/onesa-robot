@@ -66,7 +66,7 @@ billed runner minutes. Empty entries are not proof a workflow is broken or unuse
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Company Portal | Next.js lint/types/build/browser/contracts | Node tests/DB/contracts/image/startup | Read-only annotations + blocking scans | Scoped manual + opt-in auto; not deployed | Exact technical artifact + owner reviews | External owner handoff; blocked pending controls | Receipt/probes configured; live not run | Local implementation; owner activation pending |
 | AI Platform | Next.js lint/types/build/browser/docs/TLS/contracts | Python tests/DB/pgvector/API/image/startup | Read-only annotations + blocking scans | Scoped manual + opt-in auto; not deployed | Exact technical artifact; hosted model/operations required | External owner handoff; blocked pending controls | Receipt/probes configured; live not run | Local implementation; owner activation pending |
-| AI Robot | Static interface/proxy/types/browser/contracts | Cloud API/simulation/safety/image/startup | Read-only annotations + blocking scans | Scoped manual + opt-in auto; not deployed | Cloud-only technical artifact; hardware excluded | External owner handoff; physical separate | Manual staging monitor + receipt; live not run | Local implementation; durable storage/owner pending |
+| Robot | Static interface/proxy/types/browser/contracts | Cloud API/simulation/safety/image/startup | Read-only annotations + blocking scans | Scoped manual + opt-in auto; not deployed | Cloud-only technical artifact; hardware excluded | External owner handoff; physical separate | Manual staging monitor + receipt; live not run | Local implementation; durable storage/owner pending |
 
 
 ## Usage, runners and measured efficiency

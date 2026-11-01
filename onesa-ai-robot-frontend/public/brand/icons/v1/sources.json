@@ -7,13 +7,13 @@
   "products": [
     {
       "id": "robot",
-      "title": "Onesa AI Robot",
+      "title": "Onesa Robot",
       "accent": "#2da8a0",
       "files": [
         {
           "name": "onesa-robot.svg",
-          "sha256": "38d22f1cd8aca398bf5835ec8f383a9f7409ea2340c34e0f11ffacc38ca7816a",
-          "bytes": 3314,
+          "sha256": "35fb7e0ac799a345ef567d230ae9e6f07f95f470499af7f4c2e536c57beee771",
+          "bytes": 3311,
           "width": 32,
           "height": 32,
           "mime": "image/svg+xml"
