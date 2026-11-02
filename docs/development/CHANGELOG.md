@@ -1,5 +1,25 @@
 # Development changelog
 
+## 2026-11-02 — Recognize the observed Ubuntu regional runner mirror
+
+The signed browser-dependency preflight now accepts the exact
+`us-east-2.ec2.archive.ubuntu.com` entry observed on a disposable GitHub-hosted
+runner. Preserve its URI and priority, the required HTTPS canonical archive,
+Ubuntu signing and suite fields, bounded network settings and all other URI and
+file-custody checks. Synthetic fixtures cover the observed list, Azure removal,
+idempotence, rejected lookalikes and rejected credentialed or altered URIs. This
+CI compatibility correction changes no application, identity or release gate.
+
+## 2026-11-02 — Shared Onesa identity and product access
+
+Add an opt-in confidential Onesa identity client, browser-bound code/PKCE flow,
+live entitlement checks, viewer/operator/admin roles and global administration.
+The console uses the central account hub, recent MFA and explicit operation review.
+Issuer/subject ownership keeps existing journal records separate; legacy credentials
+remain unchanged. Stop, expiry, controller-disabled and no-replay controls remain.
+This is source development with local synthetic verification. Hosted activation,
+cross-product acceptance and production release remain separate gates.
+
 ## 2026-10-28 — Isolate local process and release-unit fixtures
 
 The inspection restart regression makes all owned loopback requests without

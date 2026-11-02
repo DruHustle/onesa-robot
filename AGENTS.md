@@ -94,13 +94,19 @@ invented PASS. No local runner registration or protection activation is implied.
 The public product at `/` and development privacy at `/privacy` are script-free
 and never read operator data. `/console`
 loads only the authenticated simulator API; menus and hidden markup are not access
-controls. Preserve the single configured operator and existing credentials, device
+controls. Preserve the configured operator and existing credentials in legacy mode, device
 bearer isolation, object ownership, expiring proposals, session/heartbeat revocation,
 independent software motion gate. The owner has requested session-bound administrator
 allow/block permission for future physical controllers; hardware is still in development.
 Keep that permission separate from controller connection, readiness and actual actuation.
-Only the explicitly designated existing operator may have the administrator role;
-recheck it, session, Origin/CSRF, password confirmation and revision on the backend.
+The owner has authorized one shared Onesa identity and cross-product administrators.
+When explicitly enabled, only the confidential identity service may assign Robot
+viewer/operator/admin access or the MFA-protected global administrator role; bind
+ownership to issuer and subject, never automatically merge accounts by email.
+Recheck live grants, session, Origin/CSRF and revision on the backend. Shared-identity
+operations require recent central MFA and explicit review confirmation. Legacy mode
+retains the designated existing operator and password confirmation. Identity changes
+do not enable physical controllers, migrate journal ownership or reset credentials.
 Block/Stop, logout, expiry and restart revoke permission. Permission alone must never
 send movement or claim connected hardware. Future physical activation needs its actual
 controller integration and independently qualified hardware safety/stop behavior.

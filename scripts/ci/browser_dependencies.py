@@ -140,6 +140,7 @@ def rewrite_mirror_list(text):
                 "azure.archive.ubuntu.com",
                 "archive.ubuntu.com",
                 "security.ubuntu.com",
+                "us-east-2.ec2.archive.ubuntu.com",
             }
         ):
             raise ValueError(
