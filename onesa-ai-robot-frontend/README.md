@@ -40,6 +40,10 @@ The Vercel adapter reuses the same proxy boundary, but an actual Vercel build an
 protected staged deployment still need qualification. The Git allowlist defaults to
 false and permits only staging's protected native Preview. Production uses the
 separately authorized prebuilt release; no public release is implied by a branch push.
+API function initialization does not depend on the generated static output. The
+local server loads the NVIDIA reference catalogue only when serving its static
+reference files. `tests/gateway-package.test.mjs` verifies real gateway requests
+from an isolated function directory that deliberately contains no `dist` tree.
 API schema/types are generated from the backend, checked with
 `python scripts/check-contracts.py` from the repository root using the backend venv.
 
