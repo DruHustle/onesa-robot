@@ -399,16 +399,32 @@
       "Confirmation": {
         "additionalProperties": false,
         "properties": {
+          "confirmed": {
+            "anyOf": [
+              {
+                "const": true,
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed"
+          },
           "password": {
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
           }
         },
-        "required": [
-          "password"
-        ],
         "title": "Confirmation",
         "type": "object"
       },
@@ -587,6 +603,55 @@
         "title": "Heartbeat",
         "type": "object"
       },
+      "IdentityConfigurationResponse": {
+        "properties": {
+          "account_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Url"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "IdentityConfigurationResponse",
+        "type": "object"
+      },
+      "IdentityStart": {
+        "additionalProperties": false,
+        "properties": {
+          "step_up": {
+            "default": false,
+            "title": "Step Up",
+            "type": "boolean"
+          }
+        },
+        "title": "IdentityStart",
+        "type": "object"
+      },
+      "IdentityStartResponse": {
+        "properties": {
+          "authorization_url": {
+            "title": "Authorization Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url"
+        ],
+        "title": "IdentityStartResponse",
+        "type": "object"
+      },
       "Joint": {
         "additionalProperties": false,
         "properties": {
@@ -693,6 +758,36 @@
           "password"
         ],
         "title": "Login",
+        "type": "object"
+      },
+      "LogoutResponse": {
+        "properties": {
+          "identity_signed_out": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Signed Out"
+          },
+          "physical_actuation": {
+            "const": false,
+            "default": false,
+            "title": "Physical Actuation",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "LogoutResponse",
         "type": "object"
       },
       "Measure": {
@@ -824,20 +919,38 @@
       "MissionConfirmation": {
         "additionalProperties": false,
         "properties": {
+          "confirmed": {
+            "anyOf": [
+              {
+                "const": true,
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed"
+          },
           "expected_plan_sha256": {
             "pattern": "^[a-f0-9]{64}$",
             "title": "Expected Plan Sha256",
             "type": "string"
           },
           "password": {
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
           }
         },
         "required": [
-          "password",
           "expected_plan_sha256"
         ],
         "title": "MissionConfirmation",
@@ -1847,20 +1960,38 @@
       "PhysicalPermissionConfirmation": {
         "additionalProperties": false,
         "properties": {
+          "confirmed": {
+            "anyOf": [
+              {
+                "const": true,
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed"
+          },
           "expected_revision": {
             "minimum": 0.0,
             "title": "Expected Revision",
             "type": "integer"
           },
           "password": {
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
           }
         },
         "required": [
-          "password",
           "expected_revision"
         ],
         "title": "PhysicalPermissionConfirmation",
@@ -2508,9 +2639,34 @@
       },
       "SessionResponse": {
         "properties": {
+          "authentication_method": {
+            "default": "operator",
+            "enum": [
+              "operator",
+              "onesa"
+            ],
+            "title": "Authentication Method",
+            "type": "string"
+          },
+          "confirmation_expires_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation Expires At"
+          },
           "csrf": {
             "title": "Csrf",
             "type": "string"
+          },
+          "global_administrator": {
+            "default": false,
+            "title": "Global Administrator",
+            "type": "boolean"
           },
           "name": {
             "title": "Name",
@@ -2519,6 +2675,7 @@
           "role": {
             "default": "operator",
             "enum": [
+              "viewer",
               "operator",
               "administrator"
             ],
@@ -3181,6 +3338,62 @@
         "summary": "Block Physical Permission"
       }
     },
+    "/api/v1/auth/identity/config": {
+      "get": {
+        "operationId": "identity_configuration_api_v1_auth_identity_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityConfigurationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Identity Configuration"
+      }
+    },
+    "/api/v1/auth/identity/start": {
+      "post": {
+        "operationId": "identity_start_api_v1_auth_identity_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Identity Start"
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login_api_v1_auth_login_post",
@@ -3227,7 +3440,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ActionResponse"
+                  "$ref": "#/components/schemas/LogoutResponse"
                 }
               }
             },

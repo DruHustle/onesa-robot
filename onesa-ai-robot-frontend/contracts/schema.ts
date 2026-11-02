@@ -55,6 +55,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/identity/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Identity Configuration */
+        get: operations["identity_configuration_api_v1_auth_identity_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/identity/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Identity Start */
+        post: operations["identity_start_api_v1_auth_identity_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -693,8 +727,10 @@ export interface components {
         };
         /** Confirmation */
         Confirmation: {
+            /** Confirmed */
+            confirmed?: true | null;
             /** Password */
-            password: string;
+            password?: string | null;
         };
         /** ContextRequest */
         ContextRequest: {
@@ -762,6 +798,26 @@ export interface components {
              */
             command_id: string;
         };
+        /** IdentityConfigurationResponse */
+        IdentityConfigurationResponse: {
+            /** Account Url */
+            account_url?: string | null;
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** IdentityStart */
+        IdentityStart: {
+            /**
+             * Step Up
+             * @default false
+             */
+            step_up: boolean;
+        };
+        /** IdentityStartResponse */
+        IdentityStartResponse: {
+            /** Authorization Url */
+            authorization_url: string;
+        };
         /** Joint */
         Joint: {
             /**
@@ -808,6 +864,19 @@ export interface components {
             name: string;
             /** Password */
             password: string;
+        };
+        /** LogoutResponse */
+        LogoutResponse: {
+            /** Identity Signed Out */
+            identity_signed_out?: boolean | null;
+            /**
+             * Physical Actuation
+             * @default false
+             * @constant
+             */
+            physical_actuation: false;
+            /** Status */
+            status: string;
         };
         /** Measure */
         Measure: {
@@ -868,10 +937,12 @@ export interface components {
         };
         /** MissionConfirmation */
         MissionConfirmation: {
+            /** Confirmed */
+            confirmed?: true | null;
             /** Expected Plan Sha256 */
             expected_plan_sha256: string;
             /** Password */
-            password: string;
+            password?: string | null;
         };
         /** MissionDetail */
         MissionDetail: {
@@ -1715,10 +1786,12 @@ export interface components {
         };
         /** PhysicalPermissionConfirmation */
         PhysicalPermissionConfirmation: {
+            /** Confirmed */
+            confirmed?: true | null;
             /** Expected Revision */
             expected_revision: number;
             /** Password */
-            password: string;
+            password?: string | null;
         };
         /** PhysicalPermissionResponse */
         PhysicalPermissionResponse: {
@@ -2061,8 +2134,21 @@ export interface components {
         };
         /** SessionResponse */
         SessionResponse: {
+            /**
+             * Authentication Method
+             * @default operator
+             * @enum {string}
+             */
+            authentication_method: "operator" | "onesa";
+            /** Confirmation Expires At */
+            confirmation_expires_at?: number | null;
             /** Csrf */
             csrf: string;
+            /**
+             * Global Administrator
+             * @default false
+             */
+            global_administrator: boolean;
             /** Name */
             name: string;
             /**
@@ -2070,7 +2156,7 @@ export interface components {
              * @default operator
              * @enum {string}
              */
-            role: "operator" | "administrator";
+            role: "viewer" | "operator" | "administrator";
         };
         /** Skill */
         Skill: {
@@ -2393,6 +2479,59 @@ export interface operations {
             };
         };
     };
+    identity_configuration_api_v1_auth_identity_config_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityConfigurationResponse"];
+                };
+            };
+        };
+    };
+    identity_start_api_v1_auth_identity_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityStartResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     login_api_v1_auth_login_post: {
         parameters: {
             query?: never;
@@ -2441,7 +2580,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ActionResponse"];
+                    "application/json": components["schemas"]["LogoutResponse"];
                 };
             };
         };

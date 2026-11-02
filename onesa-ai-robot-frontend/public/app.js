@@ -3,12 +3,13 @@ import {RobotClient} from './client.js';
 const client = new RobotClient();
 const byId = id => document.getElementById(id);
 let fastPoll=false,lastIdlePoll=0;
+let identityEnabled=false,identitySession=false,identityOrigin='',identityConfirmationExpires=0,canOperate=true;
 let csrf = '', proposalId = '', timer, polling = null, generation=0, observationRevision=0, suspended=false, observationReady=false;
 const busyForms=new WeakSet();
 const observationForms=[['reset-form','reset-submit'],['proposal-form','proposal-submit'],['approval-form','approve-submit'],['mission-form','mission-submit'],['mission-approval','mission-approve-submit']];
-function setObservationReady(ready){observationReady=ready;for(const [formId,buttonId]of observationForms)byId(buttonId).disabled=!ready||busyForms.has(byId(formId));}
+function setObservationReady(ready){observationReady=ready;for(const [formId,buttonId]of observationForms)byId(buttonId).disabled=!ready||!canOperate||(identitySession&&identityConfirmationExpires<=Date.now()/1000)||busyForms.has(byId(formId));}
 let administrator=false,permissionRevision=null,permissionRead=null,lastPermissionRead=0;
-function operatorNextStep(status,proposal){if(!status||typeof status.stopped!=='boolean'||!(status.active_task===null||typeof status.active_task==='string'))return 'Waiting for a current simulator observation. Stop remains available.';if(status.stopped)return 'Stopped. Confirm your password to reset; no previous task resumes.';if(status.active_task)return 'Simulation running. Monitor the result or use Stop simulation.';if(proposal)return 'Review the proposed target and duration, then confirm within 15 seconds or cancel.';return 'Ready. Set a target and duration, then create a proposal.';}
+function operatorNextStep(status,proposal){if(!status||typeof status.stopped!=='boolean'||!(status.active_task===null||typeof status.active_task==='string'))return 'Waiting for a current simulator observation. Stop remains available.';if(status.stopped)return identitySession?'Stopped. Confirm your identity and review the reset; no previous task resumes.':'Stopped. Confirm your password to reset; no previous task resumes.';if(status.active_task)return 'Simulation running. Monitor the result or use Stop simulation.';if(proposal)return 'Review the proposed target and duration, then confirm within 15 seconds or cancel.';return 'Ready. Set a target and duration, then create a proposal.';}
 const notice = text => { byId('notice').textContent = text; };
 const inspector=createInspection(client,{run,notice});
 
@@ -18,7 +19,65 @@ function sessionPresentation(authenticated){
  if(heading)heading.textContent=authenticated?'Industrial inspection':'Operator Console';
  if(description)description.textContent=authenticated?'Plan, supervise and review a synthetic pump inspection. No physical device is connected.':'Use your approved operator account to access development simulation.';
 }
-function signedOut({preserveInitialSignIn=false}={}) {inspector.reset();fastPoll=false;lastIdlePoll=0;sessionPresentation(false);setObservationReady(false);generation++; clearInterval(timer);csrf='';client.csrf='';proposalId='';administrator=false;permissionRevision=null;permissionRead=null;lastPermissionRead=0;byId('administrator').hidden=true;byId('physical-permission-state').textContent='Unavailable';byId('physical-operation-state').textContent='Unavailable';byId('operator').hidden=true;byId('login-form').hidden=false;byId('approval-form').hidden=true;byId('history').replaceChildren();for(const field of document.querySelectorAll('input[type="password"]'))if(!preserveInitialSignIn||field.id!=='password')field.value=''; }
+function signedOut({preserveInitialSignIn=false}={}) {setIdentitySession({});inspector.reset();fastPoll=false;lastIdlePoll=0;sessionPresentation(false);setObservationReady(false);generation++; clearInterval(timer);csrf='';client.csrf='';proposalId='';administrator=false;permissionRevision=null;permissionRead=null;lastPermissionRead=0;byId('administrator').hidden=true;byId('physical-permission-state').textContent='Unavailable';byId('physical-operation-state').textContent='Unavailable';byId('operator').hidden=true;byId('login-form').hidden=identityEnabled;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=!identityEnabled;byId('approval-form').hidden=true;byId('history').replaceChildren();for(const field of document.querySelectorAll('input[type="password"]'))if(!preserveInitialSignIn||field.id!=='password')field.value=''; }
+function setIdentitySession(session){
+ identitySession=session.authentication_method==='onesa';canOperate=session.role!=='viewer';
+ identityConfirmationExpires=Number(session.confirmation_expires_at)||0;
+ client.authenticationMethod=identitySession?'onesa':'operator';client.canOperate=canOperate;client.confirmationExpires=identityConfirmationExpires;
+ if(byId('onesa-session'))byId('onesa-session').hidden=!identitySession;
+ if(byId('onesa-session-role'))byId('onesa-session-role').textContent=identitySession?`${session.name} · ${session.global_administrator?'Onesa administrator · all applications':session.role==='administrator'?'Robot administrator':session.role==='viewer'?'Viewer · read only':'Robot operator'}`:'';
+ if(byId('logout'))byId('logout').textContent=identitySession?'Sign out of Onesa':'Sign out';
+ for(const id of ['reset-password','mission-password','humanoid-password','approve-password','physical-permission-password']){
+  const input=byId(id),label=document.querySelector?.(`label[for="${id}"]`),check=byId(id+'-confirmed'),wrapper=byId(id+'-identity-label');
+  if(input){input.hidden=identitySession;input.required=!identitySession;input.value='';}
+  if(label)label.hidden=identitySession;
+  if(wrapper)wrapper.hidden=!identitySession;
+  if(check){check.required=identitySession;check.checked=false;}
+ }
+ updateIdentityConfirmation();
+}
+function updateIdentityConfirmation(){
+ if(!identitySession)return;
+ const fresh=identityConfirmationExpires>Date.now()/1000;
+ const status=byId('onesa-confirmation-status');
+ if(status)status.textContent=!canOperate?'Your account can view Robot. Ask an administrator for operator access.':fresh?'Identity confirmed with MFA. You can review and confirm operations for five minutes.':'Confirm your Onesa identity with MFA before preparing an operation. Stop and sign-out stay available.';
+ if(byId('onesa-confirm-identity'))byId('onesa-confirm-identity').hidden=!canOperate;
+}
+function readConfirmation(id){
+ const input=byId(id),check=byId(id+'-confirmed');
+ const value=identitySession?(check?.checked?{confirmed:true}:{}):{password:input.value};
+ input.value='';if(check)check.checked=false;return value;
+}
+async function startIdentity(stepUp=false){
+ const button=byId(stepUp?'onesa-confirm-identity':'onesa-sign-in-button');
+ if(button?.disabled)return;
+ if(button)button.disabled=true;
+ try{
+  const result=await client.beginIdentity(stepUp),target=new URL(result.authorization_url);
+  if(target.origin!==identityOrigin||target.pathname!=='/api/v1/identity/auth')throw new Error('Onesa sign-in could not be verified.');
+  window.location.assign(target.href);
+ }catch(error){notice(error.message);if(button)button.disabled=false;}
+}
+async function configureIdentity(){
+ if(typeof client.identityConfig!=='function')return;
+ try{
+  const value=await client.identityConfig();identityEnabled=value.enabled===true;
+  if(identityEnabled){
+   const account=new URL(value.account_url);identityOrigin=account.origin;
+   const link=byId('onesa-account-link');if(link){link.href=account.href;link.hidden=false;}
+   byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
+   if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
+  }
+  if(window.location?.search){
+   const outcome=new URLSearchParams(window.location.search).get('identity');
+   const messages={access:'Robot access is not enabled for this account. Manage your product access from your Onesa account.',unavailable:'Onesa sign-in is temporarily unavailable. Please try again.',failed:'Sign-in could not be completed. Please start again.'};
+   if(messages[outcome]){notice(messages[outcome]);window.history.replaceState(null,'','/console');}
+  }
+ }catch{notice('Sign-in settings are temporarily unavailable. Refresh this page to try again.');}
+}
+byId('onesa-sign-in-button')?.addEventListener('click',()=>void startIdentity());
+byId('onesa-confirm-identity')?.addEventListener('click',()=>void startIdentity(true));
+void configureIdentity();
 function renderPhysicalPermission(value){
  if(!['allowed','blocked'].includes(value?.permission)||!Number.isSafeInteger(value.revision)||value.revision<0||value.controller_connection!=='not_connected'||value.controller_readiness!=='not_ready'||value.physical_operation!=='inactive'||value.physical_actuation!==false)throw new Error('Physical-operation state could not be verified.');
  if(permissionRevision!==null&&value.revision<permissionRevision)return;
@@ -45,6 +104,7 @@ function verifiedObservation(status,tasks){
 async function refresh(force=true) {
   if(document.hidden||!force&&!fastPoll&&performance.now()-lastIdlePoll<3000)return;
   if(suspended || !csrf) return;
+  updateIdentityConfirmation();
   if(polling){
     if(!force)return;
     const previous=polling;await previous.settled;
@@ -71,7 +131,7 @@ async function refresh(force=true) {
     byId('next-step').textContent=status.stopped?operatorNextStep(status,proposalId):status.active_task?'Simulation running. Monitor the inspection below or use Stop simulation.':proposalId?operatorNextStep(status,proposalId):inspector.guidance?.(status)||'Ready. Choose an inspection scenario, review its plan, then approve.';
     byId('connection').textContent='Connected to software simulator';
     byId('reset-form').hidden=!status.stopped;
-    byId('stop-state').textContent=status.stopped?'Stopped — password-confirmed reset required':'Ready for a simulation proposal';
+    byId('stop-state').textContent=status.stopped?identitySession?'Stopped — identity-confirmed reset required':'Stopped — password-confirmed reset required':'Ready for a simulation proposal';
     byId('position').textContent=Number(status.position_radians).toFixed(4);
     byId('active').textContent=status.active_task || 'None';
     byId('sampled-at').textContent=Number.isFinite(status.sampled_at)?new Date(status.sampled_at*1000).toLocaleString(undefined,{timeZoneName:'short'}):'Unavailable · simulator API update required';
@@ -130,20 +190,20 @@ byId('login-form').addEventListener('submit',event=>{
     const session=await client.login(credentials);
     if(suspended||current!==generation)return;
     byId('password').value='';
-    csrf=session.csrf;client.csrf=csrf;setAdministrator(session);byId('login-form').hidden=true;byId('operator').hidden=false;sessionPresentation(true);inspector.authenticate();timer=setInterval(()=>refresh(false),500);
+    csrf=session.csrf;client.csrf=csrf;setIdentitySession(session);setAdministrator(session);byId('login-form').hidden=true;byId('operator').hidden=false;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=true;sessionPresentation(true);inspector.authenticate();timer=setInterval(()=>refresh(false),500);
   },'Signed in.',event.currentTarget,current);
 });
-byId('physical-permission-form').addEventListener('submit',event=>{event.preventDefault();const password=byId('physical-permission-password').value,revision=permissionRevision,current=generation;byId('physical-permission-password').value='';run(async()=>{if(!administrator||revision===null)throw new Error('Refresh and review the current administrator permission before allowing operation.');const value=await client.allowPhysical({password,expected_revision:revision});if(current===generation&&administrator&&!suspended)renderPhysicalPermission(value);},'Permission request completed. The current confirmed state is shown in Robot administration; no movement started.',event.currentTarget,current);});
+byId('physical-permission-form').addEventListener('submit',event=>{event.preventDefault();const confirmation=readConfirmation('physical-permission-password'),revision=permissionRevision,current=generation;byId('physical-permission-password').value='';run(async()=>{if(!administrator||revision===null)throw new Error('Refresh and review the current administrator permission before allowing operation.');const value=await client.allowPhysical({...confirmation,expected_revision:revision});if(current===generation&&administrator&&!suspended)renderPhysicalPermission(value);},'Permission request completed. The current confirmed state is shown in Robot administration; no movement started.',event.currentTarget,current);});
 byId('block-physical-permission').addEventListener('click',()=>{const current=generation;run(async()=>{const value=await client.blockPhysical();if(current===generation&&administrator&&!suspended)renderPhysicalPermission(value);},'Administrator permission blocked.',null,current);});
-byId('reset-form').addEventListener('submit',event=>{event.preventDefault();const password=byId('reset-password').value;byId('reset-password').value='';run(()=>client.reset({password}),'Simulation stop reset.',event.currentTarget);});
-byId('proposal-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{const target=Number(byId('target').value),duration=Number(byId('duration').value);const data=await client.propose({command_id:crypto.randomUUID(),issued_at:Date.now()/1000,target_radians:target,duration_seconds:duration});proposalId=data.id;byId('proposal-summary').textContent=`Target ${target} radians over ${duration} seconds. Review this synthetic movement before confirming. Approval expires after 15 seconds.`;byId('proposed-id').textContent=proposalId;byId('approval-form').hidden=false;byId('approve-password').focus();},'Proposal created. Confirm within 15 seconds.',event.currentTarget);});
-byId('approval-form').addEventListener('submit',event=>{event.preventDefault();const password=byId('approve-password').value;byId('approve-password').value='';run(async()=>{await client.approve(proposalId,{password});byId('approval-form').hidden=true;proposalId='';},'Simulation running; heartbeat must remain connected.',event.currentTarget);});
+byId('reset-form').addEventListener('submit',event=>{event.preventDefault();const confirmation=readConfirmation('reset-password');run(()=>client.reset(confirmation),'Simulation stop reset.',event.currentTarget);});
+byId('proposal-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{const target=Number(byId('target').value),duration=Number(byId('duration').value);const data=await client.propose({command_id:crypto.randomUUID(),issued_at:Date.now()/1000,target_radians:target,duration_seconds:duration});proposalId=data.id;byId('proposal-summary').textContent=`Target ${target} radians over ${duration} seconds. Review this synthetic movement before confirming. Approval expires after 15 seconds.`;byId('proposed-id').textContent=proposalId;byId('approval-form').hidden=false;byId(identitySession?'approve-password-confirmed':'approve-password').focus();},'Proposal created. Confirm within 15 seconds.',event.currentTarget);});
+byId('approval-form').addEventListener('submit',event=>{event.preventDefault();const confirmation=readConfirmation('approve-password');run(async()=>{await client.approve(proposalId,confirmation);byId('approval-form').hidden=true;proposalId='';},'Simulation running; heartbeat must remain connected.',event.currentTarget);});
 byId('cancel').addEventListener('click',()=>run(async()=>{await client.cancel(proposalId);byId('approval-form').hidden=true;proposalId='';},'Proposal cancelled.'));
 byId('stop').addEventListener('click',()=>run(()=>client.stop(),'Simulation stopped. Reset requires confirmation.'));
-byId('logout').addEventListener('click',()=>run(async()=>{await client.logout();signedOut();},'Signed out; this session cannot authorize further tasks.'));
+byId('logout').addEventListener('click',()=>run(async()=>{const result=await client.logout();signedOut();if(result.identity_signed_out===false)throw new Error('Signed out of Robot. Open your Onesa account to finish signing out of other applications.');},identitySession?'Signed out of Onesa. Other applications will require sign-in.':'Signed out; this session cannot authorize further tasks.'));
 // No localStorage/sessionStorage, token URLs or persistence of operator credentials.
 
-function restoreSession({initial=false}={}){const current=++generation;return client.me().then(session=>{if(current!==generation)return;csrf=session.csrf;client.csrf=csrf;setAdministrator(session);byId('login-form').hidden=true;byId('operator').hidden=false;sessionPresentation(true);inspector.authenticate();timer=setInterval(()=>refresh(false),500);return refresh();}).catch(error=>{if(current!==generation)return;if(error.status===401)signedOut({preserveInitialSignIn:initial});else if(error.name!=='AbortError')notice(error.message);});}
+function restoreSession({initial=false}={}){const current=++generation;return client.me().then(session=>{if(current!==generation)return;csrf=session.csrf;client.csrf=csrf;setIdentitySession(session);setAdministrator(session);byId('login-form').hidden=true;byId('operator').hidden=false;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=true;sessionPresentation(true);inspector.authenticate();timer=setInterval(()=>refresh(false),500);return refresh();}).catch(error=>{if(current!==generation)return;if(error.status===401)signedOut({preserveInitialSignIn:initial});else if(error.name!=='AbortError')notice(error.message);});}
 function suspendRequests(){inspector.stale();setObservationReady(false);suspended=true;generation++;clearInterval(timer);client.cancelPending();polling=null;}
 window.addEventListener('beforeunload',suspendRequests);
 window.addEventListener('pagehide',suspendRequests);

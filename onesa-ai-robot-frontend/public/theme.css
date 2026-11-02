@@ -86,3 +86,6 @@ h1,h2,h3{font-weight:600;letter-spacing:-.035em;line-height:1.12}h1{font-size:cl
 .nvidia-attribution{font-size:.875rem;line-height:1.5;overflow-wrap:anywhere}
 .nvidia-attribution a{display:inline-block;padding:.35rem .25rem;margin-right:.5rem}
 @media(prefers-color-scheme:dark){.nvidia-stage{background:#10232b}}
+
+/* Shared Onesa identity stays within Robot's existing visual foundation. */
+#onesa-sign-in,#onesa-session{max-width:760px;padding:24px;border:1px solid var(--onesa-border);border-radius:var(--onesa-radius);background:var(--onesa-surface);margin:24px 0}#onesa-sign-in h2,#onesa-session h2{margin-top:0;font-size:1.35rem}#onesa-sign-in p,#onesa-session p{line-height:1.6;max-width:64ch}#onesa-sign-in-button{width:100%}label[id$="-identity-label"]{display:flex;align-items:flex-start;gap:12px;padding:10px 0}label[id$="-identity-label"] input[type="checkbox"]{width:22px;min-width:22px;height:22px;min-height:22px;margin:2px 0;accent-color:var(--onesa-accent)}@media(max-width:700px){#onesa-sign-in,#onesa-session{padding:20px}#onesa-confirm-identity{width:100%}}
