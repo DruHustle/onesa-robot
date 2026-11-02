@@ -6,6 +6,14 @@ GLB resources. `tests/nvidia-assets.test.mjs` exercises actual asset integrity,
 altered-package refusal, bounded browser downloads, cancellation and the complete
 locally packaged Three.js import graph. Proxy tests check actual bytes/MIME types
 and retain unknown-path/traversal denial.
+`tests/gateway-package.test.mjs` copies the real gateway and its runtime modules
+into a temporary function directory without `dist` or the NVIDIA catalogue. A
+disposable loopback upstream verifies health/readiness JSON, anonymous JSON 401
+and a subsequent healthy response from the same gateway process. This catches
+static-asset reads during API module initialization; the complete-build proxy
+tests continue to verify local static delivery. Run both with
+`node --test tests/gateway-package.test.mjs tests/proxy.test.mjs` from the frontend.
+This local package-boundary regression does not establish hosted acceptance.
 Fixed local reference requests retain same-origin preview cookies and reject
 redirects. The protected-preview browser fixture requires a synthetic HttpOnly
 cookie at an actual loopback HTTP server, proves that a static 401 does not sign
