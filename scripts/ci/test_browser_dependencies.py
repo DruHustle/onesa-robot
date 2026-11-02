@@ -187,6 +187,64 @@ class BrowserDependenciesTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 browser.rewrite_mirror_list(text)
 
+    def test_observed_regional_mirror_preserves_existing_sources_and_priority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            apt, source = self.fixture(root)
+            source.write_text(
+                "URIs: mirror+file:/etc/apt/apt-mirrors.txt\n"
+                "Suites: noble noble-security\nSigned-By: /keys/ubuntu.gpg\n"
+            )
+            before = source.read_bytes()
+            mirror = apt / "apt-mirrors.txt"
+            content = (
+                "http://us-east-2.ec2.archive.ubuntu.com/ubuntu/ priority:1\n"
+                "https://archive.ubuntu.com/ubuntu/ priority:2\n"
+                "https://security.ubuntu.com/ubuntu/ priority:3\n"
+            )
+            mirror.write_text(content)
+            mirror.chmod(0o644)
+            for _ in range(2):
+                result = browser.prepare(root)
+                self.assertEqual(result["mirror_URIs_updated"], 0)
+                self.assertFalse(result["signing_and_suite_fields_changed"])
+                self.assertEqual(source.read_bytes(), before)
+                self.assertEqual(mirror.read_text(), content)
+            self.assertEqual(
+                (apt / "apt.conf.d/99-onesa-ci-network").read_text(), browser.NETWORK
+            )
+
+    def test_regional_failover_preserves_priority_and_only_removes_azure(self):
+        regional = "http://us-east-2.ec2.archive.ubuntu.com/ubuntu/ priority:1\n"
+        azure = "http://azure.archive.ubuntu.com/ubuntu/ priority:2\n"
+        canonical = "https://archive.ubuntu.com/ubuntu/ priority:3\n"
+        self.assertEqual(
+            browser.rewrite_mirror_list(regional + azure + canonical),
+            (regional + canonical, 1),
+        )
+        with self.assertRaisesRegex(ValueError, "signed archive transport"):
+            browser.rewrite_mirror_list(regional)
+
+    def test_regional_mirror_cannot_expand_host_or_uri_authority(self):
+        host = "us-east-2.ec2.archive.ubuntu.com"
+        for uri in [
+            "https://" + host + ".example/ubuntu/",
+            "https://subdomain." + host + "/ubuntu/",
+            "https://us-east-1.ec2.archive.ubuntu.com/ubuntu/",
+            "https://private-user:private-password@" + host + "/ubuntu/",
+            "https://" + host + ":80/ubuntu/",
+            "https://" + host + ":private-port/ubuntu/",
+            "https://" + host + "/private-path/",
+            "https://" + host + "/ubuntu/?private-query",
+            "https://" + host + "/ubuntu/#private-fragment",
+            "ftp://" + host + "/ubuntu/",
+        ]:
+            text = uri + " priority:1\nhttps://archive.ubuntu.com/ubuntu/ priority:2\n"
+            with self.subTest(uri=uri), self.assertRaises(ValueError) as failure:
+                browser.rewrite_mirror_list(text)
+            for value in ("private-user", "private-password", "private-port", "private-path", "private-query", "private-fragment"):
+                self.assertNotIn(value, str(failure.exception))
+
     def test_rejected_mirror_diagnostic_reports_only_bounded_uri_structure(self):
         private_values = ["private-user", "private-password", "private-path", "private-query", "private-fragment"]
         uri = "https://private-user:private-password@archive.ubuntu.com:443/private-path?private-query#private-fragment"
