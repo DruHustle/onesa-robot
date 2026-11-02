@@ -8,6 +8,7 @@ type ApiPath = keyof paths;
 const routes = {
  missions:'/api/v1/missions',mission:'/api/v1/missions/{task_id}',missionCatalog:'/api/v1/missions/catalog',missionApprove:'/api/v1/missions/{task_id}/approve',missionExport:'/api/v1/missions/{task_id}/export',context:'/api/v1/missions/context',
  me:'/api/v1/auth/me',login:'/api/v1/auth/login',logout:'/api/v1/auth/logout',status:'/api/v1/status',
+ identityConfig:'/api/v1/auth/identity/config',identityStart:'/api/v1/auth/identity/start',
  tasks:'/api/v1/tasks',heartbeat:'/api/v1/heartbeat',stop:'/api/v1/stop',reset:'/api/v1/reset',
  humanoidModel:'/api/v1/humanoid/model',humanoidState:'/api/v1/humanoid/state',humanoidPropose:'/api/v1/humanoid/proposals',humanoidApprove:'/api/v1/humanoid/proposals/{command_id}/approve',humanoidHeartbeat:'/api/v1/humanoid/heartbeat',
  approve:'/api/v1/tasks/{task_id}/approve',cancel:'/api/v1/tasks/{task_id}/cancel'
@@ -15,6 +16,11 @@ const routes = {
 } as const satisfies Record<string,ApiPath>;
 export class RobotClient {
  csrf = '';
+ authenticationMethod: 'operator' | 'onesa' = 'operator';
+ canOperate = true;
+ confirmationExpires = 0;
+ canConfirm(){return this.canOperate&&(this.authenticationMethod!=='onesa'||this.confirmationExpires>Date.now()/1000);}
+ confirmation(password:string,confirmed:boolean):Confirmation{return this.authenticationMethod==='onesa'?{...(confirmed?{confirmed:true as const}:{})}:{password};}
  pending = new AbortController();
  cancelPending(){this.pending.abort();this.pending=new AbortController();}
  async request<T>(path:string,body?:unknown,keepalive=false):Promise<T> {
@@ -41,8 +47,10 @@ export class RobotClient {
  exportMission(id:string){return this.request<components['schemas']['MissionDetail']>(routes.missionExport.replace('{task_id}',encodeURIComponent(id)));}
  importContext(value:components['schemas']['ContextRequest']){return this.request<{id:string;asset:components['schemas']['MissionCatalog']['assets'][number]}>(routes.context,value);}
  me(){return this.request<components['schemas']['SessionResponse']>(routes.me);}
+ identityConfig(){return this.request<components['schemas']['IdentityConfigurationResponse']>(routes.identityConfig);}
+ beginIdentity(step_up=false){return this.request<components['schemas']['IdentityStartResponse']>(routes.identityStart,{step_up});}
  login(value:Login){return this.request<components['schemas']['SessionResponse']>(routes.login,value);}
- logout(){return this.request<components['schemas']['ActionResponse']>(routes.logout,{});}
+ logout(){return this.request<components['schemas']['LogoutResponse']>(routes.logout,{});}
  status(){return this.request<SimulationStatus>(routes.status);}
  tasks(){return this.request<TaskList>(routes.tasks);}
  propose(value:Proposal){return this.request<components['schemas']['TaskResponse']>(routes.tasks,value);}

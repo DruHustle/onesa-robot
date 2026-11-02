@@ -29,7 +29,14 @@ unconfigured capability honestly. Neither endpoint approves physical operation.
 Cookie sessions are opaque, hashed in storage, scoped to `/api/v1`, HttpOnly,
 SameSite Strict and Secure on HTTPS. Mutations need exact Origin plus session CSRF
 proof. Stop is operator-authorized. Reset and approval also require password proof.
-There is one configured operator identity; multi-user roles are not claimed. Login
+The default legacy mode retains one configured operator identity. The optional
+[Onesa identity layer](../docs/engineering/IDENTITY.md) accepts a centrally approved
+account with viewer/operator/admin access or global administrator authority. Shared
+mode disables the legacy login route, retains existing credentials for rollback,
+and revalidates live product access on protected reads and operations. Bearer tokens
+stay in process memory. Identity-bound owners never use email matching. Operations
+use explicit confirmation and central MFA authenticated within five minutes; legacy
+mode still uses its existing password confirmation. Login
 attempts and active sessions are bounded. Tasks/history are bounded and persisted.
 Operational request bodies are limited to 16 KiB and a five-second total receive
 deadline, including clients that trickle bytes. Incomplete requests return 408;

@@ -22,7 +22,7 @@ const port = Number(process.env.PORT || 3431);
 const upstream = new URL(process.env.ROBOT_API_URL || 'http://127.0.0.1:8431');
 if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password || upstream.pathname !== '/' || upstream.search || upstream.hash) throw new Error('ROBOT_API_URL must be a credential-free HTTP(S) origin');
 if (upstream.protocol === 'http:' && !['127.0.0.1', 'localhost', 'backend'].includes(upstream.hostname)) throw new Error('Remote gateway requires TLS');
-const routes = /^\/api\/v1\/(edge\/audit|health|ready|auth\/(login|logout|me)|admin\/physical-operation(?:\/(allow|block))?|missions(?:\/(?:catalog|context|[a-f0-9-]{36}(?:\/(?:approve|export))?))?|humanoid\/(?:model(?:\.urdf)?|state|heartbeat|proposals(?:\/[a-f0-9-]{36}\/approve)?)|status|tasks(?:\/[a-f0-9-]{36}\/(approve|cancel))?|heartbeat|stop|reset)$/;
+const routes = /^\/api\/v1\/(edge\/audit|health|ready|auth\/(login|logout|me|identity\/(config|start|callback))|admin\/physical-operation(?:\/(allow|block))?|missions(?:\/(?:catalog|context|[a-f0-9-]{36}(?:\/(?:approve|export))?))?|humanoid\/(?:model(?:\.urdf)?|state|heartbeat|proposals(?:\/[a-f0-9-]{36}\/approve)?)|status|tasks(?:\/[a-f0-9-]{36}\/(approve|cancel))?|heartbeat|stop|reset)$/;
 const security = {
   'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
@@ -34,21 +34,32 @@ export async function handler(req, res) {
     const url = new URL(req.url || '/', 'http://frontend.invalid');
     if (url.pathname.startsWith('/api/')) {
       res.setHeader('Cache-Control','no-store');
-      if (!routes.test(url.pathname) || url.search || !['GET','POST'].includes(req.method)) {res.writeHead(404).end(); return;}
+      const identityRoute=url.pathname.startsWith('/api/v1/auth/identity/');
+      const identityCallback=url.pathname==='/api/v1/auth/identity/callback';
+      const queryKeys=[...url.searchParams.keys()];
+      const validIdentityQuery=identityCallback&&req.method==='GET'&&url.search.length<=8192&&queryKeys.every(key=>['code','state','error','error_description','iss'].includes(key)&&url.searchParams.getAll(key).length===1);
+      if (!routes.test(url.pathname) || url.search&&!validIdentityQuery || !['GET','POST'].includes(req.method)) {res.writeHead(404).end(); return;}
       const headers = {accept:'application/json'};
       for (const name of ['origin','content-type','x-csrf-token']) if (req.headers[name]) headers[name] = req.headers[name];
-      const cookie = (req.headers.cookie || '').split(';').map(x=>x.trim()).filter(x=>/^robot_session=/.test(x)).join('; ');
+      const cookie = (req.headers.cookie || '').split(';').map(x=>x.trim()).filter(x=>/^robot_session=/.test(x)||identityRoute&&/^robot_identity=/.test(x)).join('; ');
       if (cookie) headers.cookie = cookie;
       const chunks=[]; let size=0;
       for await (const chunk of req) { size+=chunk.length; if(size>(url.pathname==='/api/v1/missions/context'?262144:16384)) {res.writeHead(413).end();return;} chunks.push(chunk); }
-      const response = await fetch(new URL(url.pathname,upstream), {method:req.method,headers,
+      const response = await fetch(new URL(url.pathname+url.search,upstream), {method:req.method,headers,
         // A journal write plus its bounded read-only confirmation can take six
         // seconds. Leave two seconds for ingress, below the client's ten-second
         // deadline. Never retry a mutation after an uncertain acknowledgement.
-        ...(req.method==='POST'?{body:Buffer.concat(chunks)}:{}), redirect:'manual',signal:AbortSignal.timeout(8000)});
-      if (response.status >= 300 && response.status < 400) {res.writeHead(502).end();return;}
+        ...(req.method==='POST'?{body:Buffer.concat(chunks)}:{}), redirect:'manual',signal:AbortSignal.timeout(identityCallback?18000:8000)});
+      const cookies=response.headers.getSetCookie().filter(x=>/^robot_session=/.test(x)||identityRoute&&/^robot_identity=/.test(x));
+      if (response.status >= 300 && response.status < 400) {
+        const location=response.headers.get('location');
+        if(identityCallback&&response.status===303&&['/console','/console?identity=failed','/console?identity=access','/console?identity=unavailable'].includes(location)){
+          if(cookies.length)res.setHeader('Set-Cookie',cookies);
+          res.writeHead(303,{Location:location}).end();return;
+        }
+        res.writeHead(502).end();return;
+      }
       const body=Buffer.from(await response.arrayBuffer());
-      const cookies=response.headers.getSetCookie().filter(x=>/^robot_session=/.test(x));
       if(cookies.length) res.setHeader('Set-Cookie',cookies);
       res.setHeader('Content-Type',response.headers.get('content-type') || 'application/json');
       if(url.pathname==='/api/v1/humanoid/model.urdf'&&response.ok)res.setHeader('Content-Disposition','attachment; filename="onesa-humanoid-reference.urdf"');

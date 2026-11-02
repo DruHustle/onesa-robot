@@ -5,6 +5,20 @@ operator shell uses the shared pinned Onesa foundation and connects to an
 independent authenticated software simulator through a fixed same-origin proxy.
 No browser storage retains passwords, session tokens or control keys.
 
+When the backend enables shared Onesa identity, `/console` offers **Continue with
+Onesa** and a link to the central account/product-access hub. The same account can
+hold Robot viewer, operator or administrator access; global Onesa administrators
+can administer Robot. A short identity confirmation with MFA precedes sensitive
+operations. The UI then requires an explicit review checkbox for each exact plan,
+reset or permission change. It never submits an operation during sign-in. Viewers
+receive a read-only workspace with Stop and sign-out still available.
+
+**Sign out of Onesa** removes local authority first and asks the central service to
+end the account's sessions across applications. If that request is unavailable, the
+UI reports local sign-out and directs the user to finish central sign-out; it does
+not claim a global success. Legacy mode retains the existing sign-in and password
+confirmation forms. See the [identity contract](../docs/engineering/IDENTITY.md).
+
 ```sh
 npm ci --ignore-scripts
 npm run build

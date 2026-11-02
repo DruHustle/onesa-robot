@@ -31,7 +31,7 @@ function draw(positions) {
   $('humanoid-links').replaceChildren(...nodes);
 }
 function controls() {
-  const available=Boolean(model&&observation&&!busy&&!stopping&&!haltRequired&&!document.hidden);
+  const available=Boolean(model&&observation&&!busy&&!stopping&&!haltRequired&&!document.hidden&&client.canConfirm());
   const occupied=Boolean(observation?.pending||observation?.active_command);
   $('humanoid-propose').disabled=!available||occupied||observation.stopped||observation.connection!=='simulated_actuators';
   $('humanoid-approve').disabled=!available||!observation?.pending||observation.stopped;
@@ -72,7 +72,7 @@ async function load() {
     // Observe only after an earlier Stop acknowledgement, including a quick reopen.
     if(stopping)await stopping.catch(()=>{});
     if(current!==epoch)return;
-    const session=await client.me();if(current!==epoch)return;client.csrf=session.csrf;
+    const session=await client.me();if(current!==epoch)return;client.csrf=session.csrf;client.authenticationMethod=session.authentication_method||'operator';client.canOperate=session.role!=='viewer';client.confirmationExpires=session.confirmation_expires_at||0;
     const value=await client.humanoidModel();if(current!==epoch)return;
     if(value.model_id!=='onesa-humanoid-33-v1'||value.mode!=='simulation'||value.physical_actuation!==false||value.joints.length!==33)throw new Error('Humanoid model could not be verified.');
     model=value;
@@ -137,8 +137,8 @@ $('humanoid-form').addEventListener('submit',event=>{
   void mutate(()=>client.proposeHumanoid({command_id:crypto.randomUUID(),issued_at:Date.now()/1000,duration_seconds:Number($('humanoid-duration').value),targets}));
 });
 $('humanoid-approval').addEventListener('submit',event=>{
-  event.preventDefault();const plan=observation?.pending,password=$('humanoid-password').value;$('humanoid-password').value='';
-  if(plan&&!$('humanoid-approve').disabled)void mutate(()=>client.approveHumanoid(plan.request.command_id,{password,expected_plan_sha256:plan.plan_sha256}));
+  event.preventDefault();const plan=observation?.pending,password=$('humanoid-password').value,confirmed=Boolean($('humanoid-password-confirmed').checked);$('humanoid-password').value='';$('humanoid-password-confirmed').checked=false;
+  if(plan&&!$('humanoid-approve').disabled)void mutate(()=>client.approveHumanoid(plan.request.command_id,{...client.confirmation(password,confirmed),expected_plan_sha256:plan.plan_sha256}));
 });
 function stop(keepalive=false) {
   if(stopping)return stopping;

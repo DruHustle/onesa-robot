@@ -474,7 +474,13 @@ def bounded(record: Record) -> Record:
     return record
 
 
-def approve(record: Record, clock: float, actor: str) -> Record:
+def approve(
+    record: Record,
+    clock: float,
+    actor: str,
+    *,
+    authentication_method: Literal["password", "onesa_mfa"] = "password",
+) -> Record:
     if record.outcome != "awaiting_approval":
         raise ValueError("Inspection cannot be approved or replayed again")
     return bounded(
@@ -487,7 +493,11 @@ def approve(record: Record, clock: float, actor: str) -> Record:
                         at=clock,
                         elapsed_seconds=0.0,
                         kind="approved",
-                        detail="Password-confirmed exact-plan approval",
+                        detail=(
+                            "Onesa MFA and explicit exact-plan approval"
+                            if authentication_method == "onesa_mfa"
+                            else "Password-confirmed exact-plan approval"
+                        ),
                         actor=actor,
                     ),
                 ),

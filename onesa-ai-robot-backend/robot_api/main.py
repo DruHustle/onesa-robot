@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import secrets
@@ -9,16 +10,20 @@ import sqlite3
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from robot_api import humanoid, inspection
+from robot_api import onesa_identity as identity
 from robot_api.edge import EdgeMonitor, Telemetry
 from robot_api.safety import Proposal, SafetyGate, SafetyViolation
 from robot_api.security import PasswordVerifier, VerificationBusy, token_hash
@@ -42,7 +47,7 @@ JOURNAL_LOG = logging.getLogger("robot_api.journal")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_prefix="ROBOT_", extra="ignore", hide_input_in_errors=True
+        env_prefix="ROBOT_", extra="ignore", hide_input_in_errors=True, populate_by_name=True
     )
     public_origin: str = "http://localhost:3431"
     operator_name: str = Field(default="operator", min_length=1, max_length=64)
@@ -59,6 +64,13 @@ class Settings(BaseSettings):
     heartbeat_seconds: float = Field(default=3, ge=1, le=10)
     administrator_name: str = Field(default="", max_length=64)
     context_import_enabled: bool = False
+    identity_enabled: bool = Field(default=False, validation_alias="ONESA_IDENTITY_ENABLED")
+    identity_issuer: str = Field(default="", validation_alias="ONESA_IDENTITY_ISSUER")
+    identity_client_id: str = Field(default="", validation_alias="ONESA_IDENTITY_CLIENT_ID")
+    identity_client_secret: SecretStr = Field(
+        default=SecretStr(""), validation_alias="ONESA_IDENTITY_CLIENT_SECRET"
+    )
+    identity_callback_url: str = Field(default="", validation_alias="ONESA_IDENTITY_CALLBACK_URL")
 
     @model_validator(mode="after")
     def safe_runtime(self):
@@ -113,6 +125,12 @@ class Settings(BaseSettings):
         if url.scheme == "http" and url.hostname not in ("localhost", "127.0.0.1"):
             raise ValueError("Remote operator access requires HTTPS")
         self.public_origin = self.public_origin.rstrip("/")
+        if self.identity_enabled:
+            if self.identity_callback_url != (
+                self.public_origin + "/api/v1/auth/identity/callback"
+            ):
+                raise ValueError("Onesa identity callback must use this Robot public origin")
+            self.identity_configuration()
         if (
             not self.operator_password_hash.startswith("scrypt$")
             or len(self.operator_password_hash.split("$")) != 3
@@ -127,6 +145,16 @@ class Settings(BaseSettings):
             raise ValueError("Invalid operator password hash")
         return self
 
+    def identity_configuration(self) -> identity.IdentityConfig:
+        return identity.IdentityConfig(
+            issuer=self.identity_issuer,
+            client_id=self.identity_client_id,
+            client_secret=self.identity_client_secret.get_secret_value(),
+            redirect_uri=self.identity_callback_url,
+            product="robot",
+            allow_local_http=self.deployment_environment == "local",
+        )
+
 
 class Login(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -136,7 +164,38 @@ class Login(BaseModel):
 
 class Confirmation(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    password: str = Field(min_length=1, max_length=256)
+    password: str | None = Field(default=None, min_length=1, max_length=256)
+    confirmed: Literal[True] | None = None
+
+
+class IdentityStart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    step_up: bool = False
+
+
+class IdentityConfigurationResponse(BaseModel):
+    enabled: bool
+    account_url: str | None = None
+
+
+class IdentityStartResponse(BaseModel):
+    authorization_url: str
+
+
+@dataclass(frozen=True)
+class IdentityFlow:
+    browser_hash: str
+    verifier: str = field(repr=False)
+    expires: float
+    previous_session: str | None = None
+    subject: str | None = None
+    replaced_session: str | None = None
+
+
+@dataclass
+class IdentitySession:
+    access_token: str = field(repr=False)
+    principal: identity.Identity
 
 
 class MissionConfirmation(Confirmation):
@@ -171,7 +230,10 @@ class MissionCatalog(BaseModel):
 class SessionResponse(BaseModel):
     csrf: str
     name: str
-    role: Literal["operator", "administrator"] = "operator"
+    role: Literal["viewer", "operator", "administrator"] = "operator"
+    authentication_method: Literal["operator", "onesa"] = "operator"
+    confirmation_expires_at: float | None = None
+    global_administrator: bool = False
 
 
 class PhysicalPermissionConfirmation(Confirmation):
@@ -233,6 +295,10 @@ class ActionResponse(BaseModel):
     physical_actuation: Literal[False] = False
 
 
+class LogoutResponse(ActionResponse):
+    identity_signed_out: bool | None = None
+
+
 class State:
     def __init__(self, settings: Settings):
         self.humanoid = humanoid.Humanoid()
@@ -256,6 +322,11 @@ class State:
         self.physical_permission_revision = 0
         self.mutation_lock = asyncio.Lock()
         self.inspection_contexts: dict[str, tuple[str, float, inspection.Asset]] = {}
+        # Bearer tokens and sign-in transactions are process-local only. The task
+        # journal never receives credentials; restart revokes all local sessions.
+        self.identity_flows: dict[str, IdentityFlow] = {}
+        self.identity_sessions: dict[str, IdentitySession] = {}
+        self.identity_humanoid_owners: dict[UUID, str] = {}
         if not self.journal:
             settings.database_path.parent.mkdir(parents=True, exist_ok=True)
         # Transactions, routes and watchdog run on one application event-loop thread.
@@ -456,6 +527,8 @@ class State:
                         self.journal_recovery_allowed = False
                         return False
                     self.db.execute("DELETE FROM sessions")
+                    self.identity_sessions.clear()
+                    self.identity_flows.clear()
                     self.cancel("journal_recovered", stop=True)
                     self.journal = replacement
                     self.journal_failed = False
@@ -713,11 +786,12 @@ class State:
             self.active = None
 
 
-Session = dict[str, str]
+Session = dict[str, Any]
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or Settings()
+    identity_config = config.identity_configuration() if config.identity_enabled else None
 
     @asynccontextmanager
     async def lifespan(app):
@@ -893,13 +967,53 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except VerificationBusy:
             raise HTTPException(429, "Password verification busy; retry later") from None
 
-    async def confirm(sim: State, request: Request, password: str) -> None:
+    def remove_session(sim: State, key: str) -> IdentitySession | None:
+        sim.inspection_contexts = {
+            identifier: value
+            for identifier, value in sim.inspection_contexts.items()
+            if value[0] != key
+        }
+        if sim.physical_permission_owner == key:
+            sim.block_physical_permission()
+        if (
+            (sim.active and sim.active["session"] == key)
+            or (sim.humanoid.active and sim.humanoid.active.owner == key)
+            or (sim.humanoid.pending and sim.humanoid.pending[0] == key)
+        ):
+            sim.cancel("session_revoked", stop=True)
+        sim.db.execute("DELETE FROM sessions WHERE token=?", (key,))
+        sim.db.commit()
+        return sim.identity_sessions.pop(key, None)
+
+    def identity_owner(principal: identity.Identity) -> str:
+        # Email is a display/contact attribute, never an account-linking key.
+        value = principal.issuer + "\x00" + principal.subject
+        return "sso:" + hashlib.sha256(value.encode()).hexdigest()
+
+    def identity_role(
+        principal: identity.Identity,
+    ) -> Literal["viewer", "operator", "administrator"]:
+        if principal.global_admin or principal.product_roles.get("robot") == "admin":
+            return "administrator"
+        return "operator" if principal.product_roles.get("robot") == "operator" else "viewer"
+
+    async def confirm(sim: State, request: Request, value: Confirmation) -> None:
+        if identity_config:
+            current = await session(request)
+            principal = sim.identity_sessions[current["token"]].principal
+            if value.confirmed is not True:
+                raise HTTPException(403, "Review and explicitly confirm this operation")
+            if not principal.fresh(mfa=True):
+                raise HTTPException(
+                    403, "Confirm your Onesa identity with MFA before preparing this operation"
+                )
+            return
         failures = sim.failures["confirmation"]
         while failures and failures[0] < time.monotonic() - 60:
             failures.popleft()
         if len(failures) >= 5:
             raise HTTPException(429, "Confirmation attempts exceeded")
-        if not await password_valid(request, password):
+        if not value.password or not await password_valid(request, value.password):
             failures.append(time.monotonic())
             raise HTTPException(403, "Operator confirmation required")
 
@@ -910,16 +1024,93 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "SELECT * FROM sessions WHERE token=? AND expires>?", (key, time.time())
         ).fetchone()
         if row is None:
+            sim.identity_sessions.pop(key, None)
             raise HTTPException(401, "Sign in required")
         if request.method != "GET" and not secrets.compare_digest(
             request.headers.get("x-csrf-token", ""), row["csrf"]
         ):
             raise HTTPException(403, "CSRF verification failed")
-        return dict(row)
+        result = dict(row)
+        if not identity_config:
+            return result
+        linked = sim.identity_sessions.get(key)
+        if linked is None:
+            raise HTTPException(401, "Sign in with your Onesa account")
+        if request.url.path == "/api/v1/auth/logout":
+            # Ending this locally authenticated session cannot grant access. The
+            # revoke endpoint separately checks the token and confidential client.
+            return result
+        # Stop takes effect after local session/CSRF validation, before any identity
+        # network wait. Its independent watchdog also continues during that wait.
+        if request.url.path == "/api/v1/stop":
+            sim.cancel("operator_stop", stop=True)
+        elif request.url.path == "/api/v1/admin/physical-operation/block":
+            if identity_role(linked.principal) == "administrator":
+                sim.block_physical_permission()
+        try:
+            principal = await asyncio.to_thread(
+                identity.validate_session, identity_config, linked.access_token
+            )
+            if identity_owner(principal) != row["name"]:
+                raise identity.IdentityError("identity_rejected", "Sign in again")
+        except identity.IdentityError as error:
+            if error.status != 503:
+                remove_session(sim, key)
+            else:
+                if sim.physical_permission_owner == key:
+                    sim.block_physical_permission()
+                if (
+                    (sim.active and sim.active["session"] == key)
+                    or (sim.humanoid.active and sim.humanoid.active.owner == key)
+                    or (sim.humanoid.pending and sim.humanoid.pending[0] == key)
+                ):
+                    sim.cancel("identity_unavailable", stop=True)
+            raise HTTPException(error.status, error.message) from None
+        # A concurrent logout/expiry while the identity request was awaiting must
+        # not resurrect the original local session or permit another mutation.
+        current = sim.db.execute(
+            "SELECT 1 FROM sessions WHERE token=? AND expires>?", (key, time.time())
+        ).fetchone()
+        if current is None or sim.identity_sessions.get(key) is not linked:
+            raise HTTPException(401, "Sign in required")
+        linked.principal = principal
+        current_role = identity_role(principal)
+        if current_role != "administrator" and sim.physical_permission_owner == key:
+            sim.block_physical_permission()
+        if current_role == "viewer" and (
+            (sim.active and sim.active["session"] == key)
+            or (sim.humanoid.active and sim.humanoid.active.owner == key)
+            or (sim.humanoid.pending and sim.humanoid.pending[0] == key)
+        ):
+            sim.cancel("operator_access_revoked", stop=True)
+        if (
+            current_role == "viewer"
+            and request.method not in ("GET", "HEAD")
+            and request.url.path
+            not in (
+                "/api/v1/auth/logout",
+                "/api/v1/auth/identity/start",
+                "/api/v1/stop",
+                "/api/v1/heartbeat",
+            )
+        ):
+            raise HTTPException(403, "Operator access is required for simulation changes")
+        result.update(
+            identity_role=current_role,
+            display_name=principal.name,
+            authentication_method="onesa",
+            global_administrator=principal.global_admin,
+            confirmation_expires_at=(
+                principal.auth_time + 300 if principal.fresh(mfa=True) else None
+            ),
+        )
+        return result
 
     Operator = Annotated[Session, Depends(session)]
 
-    def role(operator: Session) -> Literal["operator", "administrator"]:
+    def role(operator: Session) -> Literal["viewer", "operator", "administrator"]:
+        if operator.get("authentication_method") == "onesa":
+            return operator["identity_role"]
         return (
             "administrator"
             if config.administrator_name and operator["name"] == config.administrator_name
@@ -933,6 +1124,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     Administrator = Annotated[Session, Depends(administrator)]
 
+    async def administrator_check(request: Request) -> None:
+        if role(await session(request)) != "administrator":
+            raise HTTPException(403, "Administrator authorization required")
+
     @app.get("/api/v1/admin/physical-operation", response_model=PhysicalPermissionResponse)
     async def physical_permission(request: Request, administrator: Administrator):
         return state(request).physical_permission()
@@ -942,7 +1137,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         value: PhysicalPermissionConfirmation, request: Request, administrator: Administrator
     ):
         sim = state(request, require_watchdog=True)
-        await confirm(sim, request, value.password)
+        await confirm(sim, request, value)
+        if identity_config:
+            await administrator_check(request)
         # Password hashing yields. Recheck revocation, Stop and a concurrent block.
         sim = state(request, require_watchdog=True)
         current = sim.db.execute(
@@ -1031,8 +1228,183 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "deployment_environment": config.deployment_environment,
         }
 
+    @app.get("/api/v1/auth/identity/config", response_model=IdentityConfigurationResponse)
+    async def identity_configuration():
+        issuer = urlsplit(identity_config.issuer) if identity_config else None
+        return {
+            "enabled": identity_config is not None,
+            "account_url": f"{issuer.scheme}://{issuer.netloc}/account" if issuer else None,
+        }
+
+    @app.post("/api/v1/auth/identity/start", response_model=IdentityStartResponse)
+    async def identity_start(value: IdentityStart, request: Request, response: Response):
+        if identity_config is None:
+            raise HTTPException(404, "Onesa sign-in is not configured")
+        sim = state(request)
+        previous = await session(request) if value.step_up else None
+        if previous is not None and (
+            sim.active
+            or sim.humanoid.active
+            or sim.humanoid.pending
+            or sim.db.execute(
+                "SELECT count(*) FROM tasks WHERE state='proposed' AND owner=?",
+                (previous["name"],),
+            ).fetchone()[0]
+        ):
+            raise HTTPException(409, "Stop or cancel pending work before confirming your identity")
+        now = time.time()
+        old_key = token_hash(request.cookies.get("robot_session", ""))
+        old_session = sim.db.execute(
+            "SELECT token FROM sessions WHERE token=? AND expires>?", (old_key, now)
+        ).fetchone()
+        # Strict session cookies may be absent on the cross-site callback. Bind
+        # retirement here; only a step-up also binds the replacement's subject.
+        replaced_session = old_key if old_session and old_key in sim.identity_sessions else None
+        sim.identity_flows = {
+            key: flow for key, flow in sim.identity_flows.items() if flow.expires > now
+        }
+        attempts = sim.failures["identity_start"]
+        while attempts and attempts[0] < time.monotonic() - 60:
+            attempts.popleft()
+        if len(sim.identity_flows) >= 64 or len(attempts) >= 30:
+            raise HTTPException(429, "Sign-in is busy. Please wait before trying again")
+        attempts.append(time.monotonic())
+        state_value, nonce, verifier = identity.new_transaction()
+        browser = secrets.token_urlsafe(32)
+        sim.identity_flows[token_hash(state_value)] = IdentityFlow(
+            browser_hash=token_hash(browser),
+            verifier=verifier,
+            expires=now + 600,
+            previous_session=previous["token"] if previous else None,
+            subject=(
+                sim.identity_sessions[previous["token"]].principal.subject if previous else None
+            ),
+            replaced_session=replaced_session,
+        )
+        response.set_cookie(
+            "robot_identity",
+            browser,
+            max_age=600,
+            httponly=True,
+            secure=config.public_origin.startswith("https:"),
+            samesite="lax",
+            path="/api/v1/auth/identity",
+        )
+        return {
+            "authorization_url": identity.authorization_url(
+                identity_config, state_value, nonce, verifier, reauthenticate=value.step_up
+            )
+        }
+
+    @app.get("/api/v1/auth/identity/callback", include_in_schema=False)
+    async def identity_callback(request: Request):
+        if identity_config is None:
+            raise HTTPException(404, "Onesa sign-in is not configured")
+        sim = state(request)
+        response = RedirectResponse("/console", status_code=303)
+        response.delete_cookie("robot_identity", path="/api/v1/auth/identity")
+        keys = list(request.query_params.keys())
+        if (
+            set(keys) - {"code", "state", "error", "error_description", "iss"}
+            or any(len(request.query_params.getlist(key)) != 1 for key in keys)
+            or len(str(request.url.query)) > 8192
+        ):
+            response.headers["location"] = "/console?identity=failed"
+            return response
+        state_value = request.query_params.get("state", "")
+        flow = sim.identity_flows.pop(token_hash(state_value), None)
+        if (
+            flow is None
+            or flow.expires <= time.time()
+            or not secrets.compare_digest(
+                flow.browser_hash, token_hash(request.cookies.get("robot_identity", ""))
+            )
+            or request.query_params.get("iss", identity_config.issuer) != identity_config.issuer
+            or "error" in request.query_params
+        ):
+            response.headers["location"] = "/console?identity=failed"
+            return response
+        access_token: str | None = None
+        try:
+            access_token = await asyncio.to_thread(
+                identity.exchange_code,
+                identity_config,
+                request.query_params.get("code", ""),
+                flow.verifier,
+            )
+            principal = await asyncio.to_thread(
+                identity.validate_session, identity_config, access_token
+            )
+            if flow.previous_session:
+                previous = sim.identity_sessions.get(flow.previous_session)
+                live = sim.db.execute(
+                    "SELECT 1 FROM sessions WHERE token=? AND expires>?",
+                    (flow.previous_session, time.time()),
+                ).fetchone()
+                if (
+                    not previous
+                    or live is None
+                    or principal.subject != flow.subject
+                    or previous.principal.subject != principal.subject
+                    or not principal.fresh(mfa=True)
+                ):
+                    raise identity.IdentityError("identity_rejected", "Confirm the same account")
+            for row in sim.db.execute(
+                "SELECT token FROM sessions WHERE expires<=?", (time.time(),)
+            ):
+                sim.identity_sessions.pop(row["token"], None)
+            sim.db.execute("DELETE FROM sessions WHERE expires<=?", (time.time(),))
+            owner = identity_owner(principal)
+            count = sim.db.execute("SELECT count(*) FROM sessions").fetchone()[0]
+            owned = sim.db.execute(
+                "SELECT count(*) FROM sessions WHERE name=?", (owner,)
+            ).fetchone()[0]
+            replaced = sim.db.execute(
+                "SELECT name FROM sessions WHERE token=?", (flow.replaced_session,)
+            ).fetchone()
+            if replaced:
+                count -= 1
+                owned -= replaced["name"] == owner
+            if count >= 100 or owned >= 5:
+                raise identity.IdentityError("identity_busy", "Session limit reached", 429)
+            token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
+            expires = min(time.time() + config.session_seconds, principal.expires_at)
+            key = token_hash(token)
+            sim.db.execute("INSERT INTO sessions VALUES(?,?,?,?)", (key, csrf, expires, owner))
+            sim.db.commit()
+            sim.identity_sessions[key] = IdentitySession(access_token, principal)
+            if flow.replaced_session:
+                previous = remove_session(sim, flow.replaced_session)
+                if previous:
+                    with contextlib.suppress(identity.IdentityError):
+                        await asyncio.to_thread(
+                            identity.revoke_session, identity_config, previous.access_token
+                        )
+            response.set_cookie(
+                "robot_session",
+                token,
+                max_age=max(1, int(expires - time.time())),
+                httponly=True,
+                secure=config.public_origin.startswith("https:"),
+                samesite="strict",
+                path="/api/v1",
+            )
+        except identity.IdentityError as error:
+            if access_token:
+                with contextlib.suppress(identity.IdentityError):
+                    await asyncio.to_thread(identity.revoke_session, identity_config, access_token)
+            outcome = (
+                "access"
+                if error.status == 403
+                else ("unavailable" if error.status == 503 else "failed")
+            )
+            response.headers["location"] = "/console?identity=" + outcome
+        return response
+
     @app.post("/api/v1/auth/login", response_model=SessionResponse)
     async def login(value: Login, request: Request, response: Response):
+        if identity_config:
+            raise HTTPException(403, "Use your Onesa account to sign in")
         sim = state(request)
         # No forwarded header trust. A single configured operator; failures are global
         # as well as per network peer, preventing spoofed peer/rate-limit bypass.
@@ -1067,28 +1439,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/auth/me", response_model=SessionResponse)
     async def me(operator: Operator):
-        return {"csrf": operator["csrf"], "name": operator["name"], "role": role(operator)}
+        return {
+            "csrf": operator["csrf"],
+            "name": operator.get("display_name", operator["name"]),
+            "role": role(operator),
+            "authentication_method": operator.get("authentication_method", "operator"),
+            "confirmation_expires_at": operator.get("confirmation_expires_at"),
+            "global_administrator": operator.get("global_administrator", False),
+        }
 
-    @app.post("/api/v1/auth/logout", response_model=ActionResponse)
+    @app.post("/api/v1/auth/logout", response_model=LogoutResponse)
     async def logout(request: Request, response: Response, operator: Operator):
         sim = state(request)
-        sim.inspection_contexts = {
-            key: value
-            for key, value in sim.inspection_contexts.items()
-            if value[0] != operator["token"]
-        }
-        if sim.physical_permission_owner == operator["token"]:
-            sim.block_physical_permission()
-        if sim.active and sim.active["session"] == operator["token"]:
-            sim.cancel("session_revoked", stop=True)
-        if (sim.humanoid.active and sim.humanoid.active.owner == operator["token"]) or (
-            sim.humanoid.pending and sim.humanoid.pending[0] == operator["token"]
-        ):
-            sim.cancel("session_revoked", stop=True)
-        sim.db.execute("DELETE FROM sessions WHERE token=?", (operator["token"],))
-        sim.db.commit()
+        linked = remove_session(sim, operator["token"])
+        identity_signed_out = None
+        if linked and identity_config:
+            identity_signed_out = False
+            try:
+                identity_signed_out = await asyncio.to_thread(
+                    identity.revoke_session,
+                    identity_config,
+                    linked.access_token,
+                    all_sessions=True,
+                )
+            except identity.IdentityError:
+                pass
         response.delete_cookie("robot_session", path="/api/v1")
-        return {"status": "signed_out"}
+        return {"status": "signed_out", "identity_signed_out": identity_signed_out}
 
     @app.get("/api/v1/status", response_model=StatusResponse)
     async def status(request: Request, operator: Operator):
@@ -1098,7 +1475,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "physical_actuation": False,
             "stopped": sim.stopped,
             "position_radians": sim.position,
-            "operator": operator["name"],
+            "operator": operator.get("display_name", operator["name"]),
             "active_task": sim.active["id"] if sim.active else None,
             "sampled_at": time.time(),
             "deployment_environment": config.deployment_environment,
@@ -1170,7 +1547,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expected_plan_sha256: str | None = None,
     ):
         sim = state(request, require_watchdog=True)
-        await confirm(sim, request, value.password)
+        await confirm(sim, request, value)
         # Confirmation yields to the watchdog/logout; recheck authority afterwards.
         sim = state(request, require_watchdog=True)
         operator = await session(request)
@@ -1199,8 +1576,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SafetyViolation as exc:
             raise HTTPException(422, str(exc)) from None
         if record is not None:
+            # The bounded audit actor carries the same full issuer/subject hash
+            # as the task owner, without its storage namespace prefix.
+            actor = (
+                operator["name"].removeprefix("sso:") if identity_config else "configured_operator"
+            )
             proposal = sim.save_inspection(
-                task_id, proposal, inspection.approve(record, time.time(), "configured_operator")
+                task_id,
+                proposal,
+                inspection.approve(
+                    record,
+                    time.time(),
+                    actor,
+                    authentication_method="onesa_mfa" if identity_config else "password",
+                ),
             )
         sim.db.execute(
             "UPDATE tasks SET state='running',reason='operator_approved' WHERE id=?", (task_id,)
@@ -1459,7 +1848,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/humanoid/state", response_model=humanoid.Observation)
     async def humanoid_state(request: Request, operator: Operator):
         sim = state(request)
-        return sim.humanoid.observe(operator["token"], time.time(), sim.stopped)
+        observed = sim.humanoid.observe(operator["token"], time.time(), sim.stopped)
+        if identity_config:
+            trim_humanoid_owners(sim)
+            observed = observed.model_copy(
+                update={
+                    "history": [
+                        plan
+                        for plan in observed.history
+                        if sim.identity_humanoid_owners.get(plan.request.command_id)
+                        == operator["name"]
+                    ]
+                }
+            )
+        return observed
+
+    def trim_humanoid_owners(sim: State) -> None:
+        # Keep only the bounded in-memory history and the current command. The
+        # session token still owns approval/execution; stable identity owns history.
+        retained = {plan.request.command_id for plan in sim.humanoid.history}
+        if sim.humanoid.pending:
+            retained.add(sim.humanoid.pending[1].request.command_id)
+        if sim.humanoid.active:
+            retained.add(sim.humanoid.active.plan.request.command_id)
+        sim.identity_humanoid_owners = {
+            command: owner
+            for command, owner in sim.identity_humanoid_owners.items()
+            if command in retained
+        }
 
     def humanoid_ready(request: Request) -> State:
         sim = state(request, require_watchdog=True)
@@ -1479,7 +1895,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def humanoid_propose(value: humanoid.MotionRequest, request: Request, operator: Operator):
         sim = humanoid_ready(request)
         try:
-            return sim.humanoid.propose(value, operator["token"], time.time())
+            plan = sim.humanoid.propose(value, operator["token"], time.time())
+            if identity_config:
+                trim_humanoid_owners(sim)
+                sim.identity_humanoid_owners[value.command_id] = operator["name"]
+            return plan
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
 
@@ -1489,7 +1909,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ):
         sim = humanoid_ready(request)
         epoch = sim.stop_epoch
-        await confirm(sim, request, value.password)
+        await confirm(sim, request, value)
         operator = await session(request)
         sim = humanoid_ready(request)
         if sim.stop_epoch != epoch:
@@ -1536,7 +1956,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def reset(value: Confirmation, request: Request, operator: Operator):
         sim = state(request, require_watchdog=True)
         stop_epoch = sim.stop_epoch
-        await confirm(sim, request, value.password)
+        await confirm(sim, request, value)
         sim = state(request, require_watchdog=True)
         await session(request)
         if sim.journal_failed:

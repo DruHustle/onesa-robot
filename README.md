@@ -69,7 +69,12 @@ tasks, account/password changes or physical operation accompanied this release. 
 
 The public [Robot product](https://robot.onesa.eu) explains that scope. The operator
 console serves protected simulation data through an independently authenticated API;
-an ordinary Onesa AI account grants no Robot operator permission. In the earlier
+an AI-only product entitlement grants no Robot operator permission. The new optional
+[shared Onesa identity](docs/engineering/IDENTITY.md) lets the same account use one,
+two or all three products, with centrally approved access and a global administrator
+role. This source capability is disabled until the issuer and exact client are
+configured and qualified on staging. It does not migrate historical operator-owned
+records or enable physical hardware. In the earlier
 2026-10-15 release, frontend and backend source
 `595fd4f494e77de4fdecacbb9e64ac46c8c3597b` passed exact-main CI, hosted staging
 (16 API/safety checks and 96 browser cases), current owner authorization and production

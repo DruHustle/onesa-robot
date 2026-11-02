@@ -176,7 +176,7 @@ export function createInspection(client, { run, notice }) {
     if (detail.record.outcome === "awaiting_approval")
       return Date.now() / 1000 - detail.record.plan.created_at > 15
         ? "This inspection plan expired. Cancel it and generate a fresh plan."
-        : "Review the inspection plan and confirm your password within 15 seconds, or cancel.";
+        : client.authenticationMethod === "onesa" ? "Review the exact inspection plan and confirm approval within 15 seconds, or cancel." : "Review the inspection plan and confirm your password within 15 seconds, or cancel.";
     if (detail.record.outcome === "running")
       return "Waiting for the final recorded inspection result.";
     return "Review this inspection’s result and read-only replay, or create a new plan.";
@@ -195,7 +195,9 @@ export function createInspection(client, { run, notice }) {
     $("mission-outcome").dataset.outcome = record.outcome;
     $("mission-pending").textContent =
       record.outcome === "awaiting_approval"
-        ? "Review the steps and source context below. Password confirmation is required."
+        ? client.authenticationMethod === "onesa"
+          ? "Review the steps and source context below. Confirm approval using your current Onesa MFA session."
+          : "Review the steps and source context below. Password confirmation is required."
         : record.outcome === "running"
           ? "Keep this page connected. Stop or cancel remains available."
           : record.outcome === "completed_findings"
@@ -415,7 +417,7 @@ export function createInspection(client, { run, notice }) {
   }
   function updateReadiness() {
     const value = status;
-    const ready = authenticated && value && !value.stopped && !value.active_task;
+    const ready = authenticated && value && !value.stopped && !value.active_task && client.canConfirm?.() !== false;
     if (value) $("mission-readiness").textContent = value.stopped
       ? "Stopped · reset required"
       : value.active_task
@@ -488,7 +490,7 @@ export function createInspection(client, { run, notice }) {
         replayTime = null;
         lastHistory = 0;
         render();
-        $("mission-password").focus();
+        $(client.authenticationMethod === "onesa" ? "mission-password-confirmed" : "mission-password").focus();
       },
       "Review the plan and approve within 15 seconds.",
       event.currentTarget,
@@ -497,16 +499,18 @@ export function createInspection(client, { run, notice }) {
   $("mission-approval").addEventListener("submit", (event) => {
     event.preventDefault();
     const password = $("mission-password").value,
+      confirmed = Boolean($("mission-password-confirmed").checked),
       current = epoch,
       id = detail?.id,
       digest = detail?.record.plan_sha256;
     $("mission-password").value = "";
+    $("mission-password-confirmed").checked = false;
     run(
       async () => {
         if (!id || !digest)
           throw new Error("Generate and review a current inspection plan.");
         const value = await client.approveMission(id, {
-          password,
+          ...(client.confirmation?.(password, confirmed) || {password}),
           expected_plan_sha256: digest,
         });
         if (current !== epoch || !authenticated) return;

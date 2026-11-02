@@ -1,5 +1,13 @@
 # Independent software builds and tests
 
+The optional shared Onesa identity client is covered by
+`tests/test_onesa_identity.py` and `tests/test_shared_identity.py` in the backend,
+plus the frontend's real loopback `tests/identity-gateway.test.mjs`. All test accounts,
+issuer assertions and secrets are synthetic. The existing simulator and legacy
+password suite remains required. Regenerate API schema and TypeScript types from
+source after changes; see [the identity contract](IDENTITY.md) for exact boundaries.
+These local checks do not assert that the hosted issuer or staging clients are active.
+
 The NVIDIA reference-library build verifies all local GLBs, previews, source
 records and licenses against their manifest hashes and rejects external or active
 GLB resources. `tests/nvidia-assets.test.mjs` exercises actual asset integrity,
