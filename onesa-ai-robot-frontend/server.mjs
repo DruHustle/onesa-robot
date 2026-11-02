@@ -5,11 +5,19 @@ import { readFile } from 'node:fs/promises';
 import { resolve, extname } from 'node:path';
 import {fileURLToPath} from 'node:url';
 const root = resolve(import.meta.dirname, 'dist');
-const referenceCatalog = JSON.parse(await readFile(resolve(root,'models/nvidia/manifest.json'),'utf8'));
-const referenceFiles = new Map();
-for(const asset of referenceCatalog.assets)for(const file of [asset.glb,asset.thumbnail,asset.licenseFile,asset.sourceFile])referenceFiles.set('/models/nvidia/'+file.path,'models/nvidia/'+file.path);
-for(const file of ['three.core.js','three.module.js','GLTFLoader.js','BufferGeometryUtils.js','SkeletonUtils.js','OrbitControls.js','LICENSE.txt'])referenceFiles.set('/vendor/three/'+file,'vendor/three/'+file);
-for(const file of ['nvidia-library.js','nvidia-assets.js','nvidia-catalog.js'])referenceFiles.set('/'+file,file);
+let referenceFiles;
+async function staticReferenceFiles() {
+  if(referenceFiles)return referenceFiles;
+  // The API function package does not contain the separately served static tree.
+  // Only local static reference requests need its generated NVIDIA catalogue.
+  const catalog=JSON.parse(await readFile(resolve(root,'models/nvidia/manifest.json'),'utf8'));
+  const files=new Map();
+  for(const asset of catalog.assets)for(const file of [asset.glb,asset.thumbnail,asset.licenseFile,asset.sourceFile])files.set('/models/nvidia/'+file.path,'models/nvidia/'+file.path);
+  for(const file of ['three.core.js','three.module.js','GLTFLoader.js','BufferGeometryUtils.js','SkeletonUtils.js','OrbitControls.js','LICENSE.txt'])files.set('/vendor/three/'+file,'vendor/three/'+file);
+  for(const file of ['nvidia-library.js','nvidia-assets.js','nvidia-catalog.js'])files.set('/'+file,file);
+  referenceFiles=files;
+  return files;
+}
 const port = Number(process.env.PORT || 3431);
 const upstream = new URL(process.env.ROBOT_API_URL || 'http://127.0.0.1:8431');
 if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password || upstream.pathname !== '/' || upstream.search || upstream.hash) throw new Error('ROBOT_API_URL must be a credential-free HTTP(S) origin');
@@ -53,7 +61,7 @@ export async function handler(req, res) {
     for(const width of [640,1280])files.set('/images/robot-concept-'+width+'.webp','images/robot-concept-'+width+'.webp');
     for(const mode of ['light','dark'])files.set('/images/robot-workspace-example-'+mode+'.png','images/robot-workspace-example-'+mode+'.png');
     for(const file of ['onesa-robot.svg','onesa-robot.ico','onesa-robot-16.png','onesa-robot-32.png','onesa-robot-64.png','onesa-robot-180.png'])files.set('/brand/icons/v1/'+file,'brand/icons/v1/'+file);
-    const file = files.get(url.pathname) || referenceFiles.get(url.pathname);
+    const file = files.get(url.pathname) || (await staticReferenceFiles()).get(url.pathname);
     if (!file) {res.writeHead(404).end();return;}
     const body=await readFile(resolve(root,file));
     const type={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.webp':'image/webp','.txt':'text/plain; charset=utf-8','.svg':'image/svg+xml','.ico':'image/vnd.microsoft.icon','.glb':'model/gltf-binary','.json':'application/json'}[extname(file)];
