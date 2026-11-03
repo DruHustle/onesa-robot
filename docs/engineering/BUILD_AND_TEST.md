@@ -443,6 +443,14 @@ Unknown/unauthorized/malformed responses and another task never satisfy it.
 
 ## Idle journal recovery and Preview observation regressions
 
+Cancelling an already completed or cancelled task is a no-op for durable history;
+it must not mark an unchanged row dirty. The idle-recovery regression exercises
+both terminal states after a synthetic journal latch, preserves the 503 response
+and exact remote history, and verifies that an otherwise eligible recovery can
+still complete. Proposed-task cancellation and all existing idle, history, lease
+and attempt-budget checks remain in force. This test does not establish the cause
+or recovery of a hosted journal latch.
+
 The renewal boundary regression in `tests/test_turso_renewal.py` controls only
 the fake provider's SQLite clock. Setting a lease to exactly eighteen seconds
 and then observing it must not depend on crossing a real wall-clock second.
