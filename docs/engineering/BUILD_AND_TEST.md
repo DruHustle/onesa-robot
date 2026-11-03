@@ -19,6 +19,12 @@ The identity observer begins capturing the start-response body when it arrives,
 before awaiting UI click completion, and validates it before Portal credential entry.
 A deterministic ordering regression makes that body unavailable after navigation;
 origin, PKCE, status and credential-entry guards remain.
+The UI observer temporarily holds only the exact Portal authorization navigation
+until the original response body has finished loading and passed validation. It
+requires the matching URL, main frame and GET method, then falls back to the existing
+context guard with native cookies and redirects. The start observer and held route
+retain bounded lifetimes, abort failures and remove only their own handler/timers.
+API-only navigation remains outside that temporary route.
 The same 18 identity cases run first in the native browser step for earlier failure
 feedback; the complete three-engine matrix remains mandatory afterward. A test-only
 observer reports fixed phase/error categories without exception text, URLs, queries,
