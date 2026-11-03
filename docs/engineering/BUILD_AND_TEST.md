@@ -8,6 +8,14 @@ password suite remains required. Regenerate API schema and TypeScript types from
 source after changes; see [the identity contract](IDENTITY.md) for exact boundaries.
 These local checks do not assert that the hosted issuer or staging clients are active.
 
+The owner identity browser fixture uses a disposable loopback HTTPS server and a
+CONNECT proxy restricted to its two exact synthetic Portal and Robot hosts. Real
+302 responses exercise browser navigation and host-only Secure/HttpOnly cookie
+delivery in Chromium, Firefox and WebKit. Its ephemeral certificate is trusted only
+inside that test context; production origin, TLS and cookie guards are unchanged.
+The Node transport regression checks response bytes, both permitted hosts, rejected
+foreign authorities and shutdown. It does not replace the pinned browser matrix.
+
 The NVIDIA reference-library build verifies all local GLBs, previews, source
 records and licenses against their manifest hashes and rejects external or active
 GLB resources. `tests/nvidia-assets.test.mjs` exercises actual asset integrity,
