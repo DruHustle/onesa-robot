@@ -15,16 +15,15 @@ delivery in Chromium, Firefox and WebKit. Its ephemeral certificate is trusted o
 inside that test context; production origin, TLS and cookie guards are unchanged.
 The Node transport regression checks response bytes, both permitted hosts, rejected
 foreign authorities and shutdown. It does not replace the pinned browser matrix.
-The identity observer begins capturing the start-response body when it arrives,
-before awaiting UI click completion, and validates it before Portal credential entry.
-A deterministic ordering regression makes that body unavailable after navigation;
-origin, PKCE, status and credential-entry guards remain.
-The UI observer temporarily holds only the exact Portal authorization navigation
-until the original response body has finished loading and passed validation. It
-requires the matching URL, main frame and GET method, then falls back to the existing
-context guard with native cookies and redirects. The start observer and held route
-retain bounded lifetimes, abort failures and remove only their own handler/timers.
-API-only navigation remains outside that temporary route.
+The UI observer registers the successful main-frame start POST and actual issuer
+authorization GET before clicking. It validates client, callback, S256 challenge,
+nonce, state, scope and step-up fields on the actual browser request, then binds the
+callback to that transaction and requires the actual account, session and cookies.
+This observes protocol metadata that survives Chromium's document replacement;
+it installs no additional request route. The backend still binds the callback to
+its stored state, browser cookie and PKCE verifier. API-only acceptance parses the
+original JSON before its own navigation. Deterministic regressions cover unavailable
+UI response bodies, request boundaries and API-only behavior before credential entry.
 The same 18 identity cases run first in the native browser step for earlier failure
 feedback; the complete three-engine matrix remains mandatory afterward. A test-only
 observer reports fixed phase/error categories without exception text, URLs, queries,
