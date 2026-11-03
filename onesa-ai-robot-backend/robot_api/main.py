@@ -1935,9 +1935,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "Task not found")
         if row["state"] == "running" or (sim.active and sim.active["id"] == task_id):
             sim.cancel("operator_cancel", stop=True)
-        else:
-            if row["state"] == "proposed":
-                sim.interrupt_inspection(row, "operator_cancel")
+        elif row["state"] == "proposed":
+            sim.interrupt_inspection(row, "operator_cancel")
             sim.db.execute(
                 "UPDATE tasks SET state='cancelled',reason='operator_cancel' "
                 "WHERE id=? AND state='proposed'",
