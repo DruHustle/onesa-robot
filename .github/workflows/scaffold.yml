@@ -159,7 +159,7 @@ jobs:
         \ > /tmp/robot-frontend-test.log 2>&1 &\nfrontend_pid=$!\ntrap 'kill \"$backend_pid\" \"$frontend_pid\" 2>/dev/null\
         \ || true' EXIT\nfor attempt in $(seq 1 30); do\n  if curl -fsS http://localhost:3431/api/v1/ready > /dev/null; then\
         \ break; fi\n  echo \"Waiting for Robot readiness: $attempt\"\n  sleep 1\ndone\ncurl -fsS http://localhost:3431/api/v1/ready\
-        \ > /dev/null\nxvfb-run -a --server-args='-screen 0 1920x1080x24' npm --prefix onesa-ai-robot-frontend run test:e2e\n"
+        \ > /dev/null\nxvfb-run -a --server-args='-screen 0 1920x1080x24' npm --prefix onesa-ai-robot-frontend run test:e2e -- tests/browser/owner-identity-flow.spec.mjs\nxvfb-run -a --server-args='-screen 0 1920x1080x24' npm --prefix onesa-ai-robot-frontend run test:e2e\n"
     - name: Retain sanitized synthetic browser outcomes
       id: browser_diagnostics
       if: ${{ always() }}

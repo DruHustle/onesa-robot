@@ -493,6 +493,28 @@ print(json.dumps(v))
         with self.assertRaises(o.Rejected):
             self.context()
 
+    def test_robot_native_and_identity_scopes_each_keep_one_context_for_same_source(
+        self,
+    ):
+        template = self.store.policy["components"][self.binding["repository"] + ":api"]
+        identifiers = set()
+        for component in ["api", "frontend", "identity-api", "identity-frontend"]:
+            binding = {
+                **self.binding,
+                "repository": "DruHustle/onesa-robot",
+                "component": component,
+            }
+            self.store.policy["components"][binding["repository"] + ":" + component] = {
+                **template,
+                "qualification_attempt_limit": 1,
+            }
+            context = self.store.issue_context(binding)["record"]
+            self.assertEqual(context["binding"], binding)
+            identifiers.add(context["id"])
+            with self.assertRaisesRegex(o.Rejected, "allowance exhausted"):
+                self.store.issue_context(binding)
+        self.assertEqual(len(identifiers), 4)
+
     def test_commission_requires_explicit_owner_bootstrap(self):
         with (
             patch.dict(os.environ, {"SUDO_USER": "", "GITHUB_ACTIONS": "true"}),

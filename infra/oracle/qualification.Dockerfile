@@ -7,6 +7,7 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules/npm /tmp/npm
 WORKDIR /opt/onesa-ai-robot
 COPY onesa-ai-robot-frontend/package.json onesa-ai-robot-frontend/package-lock.json ./onesa-ai-robot-frontend/
+COPY onesa-ai-robot-frontend/vendor ./onesa-ai-robot-frontend/vendor
 RUN node /tmp/npm/bin/npm-cli.js ci --ignore-scripts --prefix onesa-ai-robot-frontend && node onesa-ai-robot-frontend/node_modules/playwright/cli.js install --with-deps chromium firefox webkit && ln -s onesa-ai-robot-frontend/node_modules node_modules && rm -rf /tmp/npm /root/.npm /var/lib/apt/lists/* /usr/local/lib/node_modules/npm /opt/yarn-* && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 # The explicit Node/Python probe never starts the base image's service manager.
 # Remove that unused Go executable rather than carrying its vulnerable runtime.

@@ -145,7 +145,7 @@ def edge_backend(environment, oracle_staging_api=None):
     return origin(os.environ["ROBOT_API_URL"], ".onrender.com")
 
 
-def run(url, environment, *, oracle_staging_api=None):
+def run(url, environment, *, oracle_staging_api=None, identity_login=None):
     record = {
         "scope": "software-simulation-only",
         "status": "BLOCKED",
@@ -158,6 +158,13 @@ def run(url, environment, *, oracle_staging_api=None):
         edge_backend(environment, oracle_staging_api)
         if oracle_staging_api is not None
         else None
+    )
+    require(
+        identity_login is None
+        or callable(identity_login)
+        and environment == "Staging"
+        and oracle_backend == "https://robot-api-staging.onesa.eu",
+        "Identity simulator acceptance is exact Oracle staging only",
     )
     password = os.environ.get("ROBOT_TEST_PASSWORD", "")
     name = os.environ.get("ROBOT_TEST_OPERATOR", "")
@@ -176,6 +183,34 @@ def run(url, environment, *, oracle_staging_api=None):
             "Unapproved production operator origin",
         )
     api = Simulator(url)
+    confirmation = (
+        {"confirmed": True} if identity_login is not None else {"password": password}
+    )
+
+    def sign_in():
+        login = (
+            identity_login(api)
+            if identity_login is not None
+            else api.call("/api/v1/auth/login", {"name": name, "password": password})
+        )
+        if identity_login is not None:
+            require(
+                login.get("authentication_method") == "onesa"
+                and login.get("role") == "administrator"
+                and (login.get("confirmation_expires_at") or 0) > time.time(),
+                "Fresh shared administrator identity required",
+            )
+        api.csrf = login["csrf"]
+        return login
+
+    def sign_out():
+        result = api.call("/api/v1/auth/logout", {})
+        if identity_login is not None:
+            require(
+                result.get("identity_signed_out") is True,
+                "Shared identity revocation must be confirmed",
+            )
+
     logged_in = False
     checks = record["checks"]
     phase = "frontend_availability"
@@ -207,10 +242,9 @@ def run(url, environment, *, oracle_staging_api=None):
         api.call(
             "/api/v1/auth/login",
             {"name": name, "password": "invalid-synthetic-login"},
-            expected=401,
+            expected=403 if identity_login is not None else 401,
         )
-        login = api.call("/api/v1/auth/login", {"name": name, "password": password})
-        api.csrf = login["csrf"]
+        login = sign_in()
         logged_in = True
         require(
             any(cookie.secure and cookie.name == "robot_session" for cookie in api.jar),
@@ -233,7 +267,7 @@ def run(url, environment, *, oracle_staging_api=None):
         allowed = api.call(
             "/api/v1/admin/physical-operation/allow",
             {
-                "password": password,
+                **confirmation,
                 "expected_revision": permission["revision"],
             },
         )
@@ -313,7 +347,7 @@ def run(url, environment, *, oracle_staging_api=None):
         api.call("/api/v1/stop", {})
 
         def reset():
-            api.call("/api/v1/reset", {"password": password})
+            api.call("/api/v1/reset", confirmation)
 
         def proposal(**changes):
             return {
@@ -329,7 +363,7 @@ def run(url, environment, *, oracle_staging_api=None):
             return value["command_id"]
 
         def approve(identifier):
-            api.call("/api/v1/tasks/" + identifier + "/approve", {"password": password})
+            api.call("/api/v1/tasks/" + identifier + "/approve", confirmation)
 
         reset()
         api.call("/api/v1/tasks", proposal(issued_at=time.time() - 60), expected=422)
@@ -362,7 +396,7 @@ def run(url, environment, *, oracle_staging_api=None):
         phase = "replay_rejection"
         api.call(
             "/api/v1/tasks/" + identifier + "/approve",
-            {"password": password},
+            confirmation,
             expected=409,
         )
         checks["replay_rejection"] = "PASS"
@@ -377,11 +411,9 @@ def run(url, environment, *, oracle_staging_api=None):
         # Revoke the approving session: execution cannot survive reconnect/login.
         disconnected = create(proposal(target_radians=0.2, duration_seconds=10))
         approve(disconnected)
-        api.call("/api/v1/auth/logout", {})
+        sign_out()
         logged_in = False
-        api.csrf = api.call("/api/v1/auth/login", {"name": name, "password": password})[
-            "csrf"
-        ]
+        sign_in()
         logged_in = True
         require(api.call("/api/v1/status")["stopped"], "Lost authority did not stop")
         history = api.call("/api/v1/tasks")["tasks"]
@@ -430,7 +462,7 @@ def run(url, environment, *, oracle_staging_api=None):
         if logged_in:
             try:
                 api.call("/api/v1/stop", {})
-                api.call("/api/v1/auth/logout", {})
+                sign_out()
             except (Rejected, ValueError, urllib.error.URLError, TimeoutError):
                 record["status"] = "FAIL"
     return record

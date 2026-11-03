@@ -11,7 +11,7 @@ function durable(directory,name,value){
 }
 function createGuard(directory,approvedOrigin='https://api.vercel.com'){
  const scope=JSON.parse(fs.readFileSync(path.join(directory,'scope.json')));
- if(scope.request_budget!==1||!/^[a-f0-9-]{36}$/.test(scope.operation_id)||scope.repository!=='DruHustle/onesa-robot'||scope.component!=='frontend'||!['staging','production'].includes(scope.environment))throw Error('Invalid owner transport scope');
+ if(scope.request_budget!==1||!/^[a-f0-9-]{36}$/.test(scope.operation_id)||scope.repository!=='DruHustle/onesa-robot'||!['frontend','identity-frontend'].includes(scope.component)||!['staging','production'].includes(scope.environment))throw Error('Invalid owner transport scope');
  return function check(origin,method,requestPath){
   if(String(method).toUpperCase()!=='POST'||!endpoint.test(String(requestPath)))return;
   if(new URL(String(origin)).origin!==approvedOrigin)throw Error('Deployment create target refused');

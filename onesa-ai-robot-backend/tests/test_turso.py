@@ -111,6 +111,7 @@ def remote(tmp_path, monkeypatch):
         "after_execute": None,
         "before_execute": None,
         "round_float_json": False,
+        "database_clock": None,
     }
 
     async def handler(request):
@@ -139,6 +140,10 @@ def remote(tmp_path, monkeypatch):
                     value = 0.1
             args.append(value)
         with sqlite3.connect(path) as db:
+            if state["database_clock"] is not None:
+                # Lease boundary fixtures control database seconds independently
+                # of the application's monotonic transport deadlines.
+                db.create_function("unixepoch", 0, state["database_clock"])
             cursor = db.execute(statement["sql"], args)
             columns = [col[0] for col in cursor.description or []]
             rows = cursor.fetchall()

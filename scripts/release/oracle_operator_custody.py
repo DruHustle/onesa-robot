@@ -75,8 +75,11 @@ def clear_expired(candidate):
 
 
 def _collect(plan, candidate, prompt):
-    component = plan.get("release_component", "api")
-    r.require(component in {"api", "frontend"}, "EXPLICIT_EXISTING_COMPONENT_MODE")
+    component = plan.get(
+        "release_component",
+        "identity-api" if plan.get("identity") is not None else "api",
+    )
+    r.require(component in r.COMPONENTS, "EXPLICIT_EXISTING_COMPONENT_MODE")
     binding = plan["bindings"][component]
     r.require(
         binding["candidate_commit"] == candidate,

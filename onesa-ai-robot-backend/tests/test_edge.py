@@ -138,7 +138,10 @@ def test_production_ephemeral_and_real_device_startup_blocked(settings):
             Settings(**{**settings.model_dump(), **changes})
 
 
-def test_hosted_acceptance_executes_real_api_and_safety_flows(settings, monkeypatch):
+@pytest.mark.parametrize("shared_identity", [False, True])
+def test_hosted_acceptance_executes_real_api_and_safety_flows(
+    settings, monkeypatch, shared_identity
+):
     """Hosted transport is adapted locally; simulator/auth/safety handlers are real."""
     import http.cookiejar
     import json
@@ -152,6 +155,27 @@ def test_hosted_acceptance_executes_real_api_and_safety_flows(settings, monkeypa
     settings.administrator_name = settings.operator_name
     settings.deployment_environment = "staging"
     settings.storage_mode = "ephemeral-simulation"
+    issuer = None
+    if shared_identity:
+        from test_shared_identity import ISSUER, Issuer, person
+
+        from robot_api import onesa_identity as identity
+
+        issuer = Issuer()
+        principal = person(role="admin", admin=True)
+        monkeypatch.setattr(identity, "exchange_code", issuer.exchange)
+        monkeypatch.setattr(identity, "validate_session", issuer.validate)
+        monkeypatch.setattr(identity, "revoke_session", issuer.revoke)
+        settings = Settings(
+            **{
+                **settings.model_dump(),
+                "identity_enabled": True,
+                "identity_issuer": ISSUER,
+                "identity_client_id": "robot-synthetic",
+                "identity_client_secret": "test-only-synthetic-client-secret-" + "x" * 32,
+                "identity_callback_url": settings.public_origin + "/api/v1/auth/identity/callback",
+            }
+        )
     config = {
         "ROBOT_TEST_PASSWORD": "synthetic-test-password",
         "ROBOT_TEST_OPERATOR": "operator",
@@ -163,6 +187,7 @@ def test_hosted_acceptance_executes_real_api_and_safety_flows(settings, monkeypa
     for key, value in config.items():
         monkeypatch.setenv(key, value)
     with TestClient(create_app(settings), base_url=settings.public_origin) as api:
+        api.headers["Origin"] = settings.public_origin
 
         class LocalSimulator:
             def __init__(self, url):
@@ -215,7 +240,33 @@ def test_hosted_acceptance_executes_real_api_and_safety_flows(settings, monkeypa
 
         monkeypatch.setattr(smoke, "Simulator", LocalSimulator)
         monkeypatch.setattr(smoke.urllib.request, "build_opener", lambda *args: LocalEdge())
-        result = smoke.run(settings.public_origin, "Staging")
+        identity_login = None
+        if shared_identity:
+            from test_shared_identity import finish, start
+
+            def identity_login(local):
+                response = finish(api, issuer, principal, start(api))
+                assert response.status_code == 303
+                observed = api.get("/api/v1/auth/me")
+                assert observed.status_code == 200
+                return observed.json()
+
+        result = smoke.run(
+            settings.public_origin,
+            "Staging",
+            **(
+                {
+                    "identity_login": identity_login,
+                    "oracle_staging_api": "https://robot-api-staging.onesa.eu",
+                }
+                if shared_identity
+                else {}
+            ),
+        )
         assert result["status"] == "PASS", result
         assert all(value == "PASS" for value in result["checks"].values())
         assert result["physical_hardware_approved"] is False
+        if shared_identity:
+            assert len(issuer.exchanges) == 2  # Initial login and real reconnect.
+            assert len(issuer.revocations) == 2
+            assert all(all_sessions is True for _token, all_sessions in issuer.revocations)

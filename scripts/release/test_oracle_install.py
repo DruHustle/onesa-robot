@@ -2,6 +2,7 @@
 
 import base64
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -83,6 +84,7 @@ class InstallTests(unittest.TestCase):
             self.manifest["files"][local] = hashlib.sha256(data).hexdigest()
         for name in [
             "scripts/release/oracle_robot_browser.mjs",
+            "scripts/release/oracle_robot_identity_browser.mjs",
             "onesa-ai-robot-frontend/package.json",
             "onesa-ai-robot-frontend/package-lock.json",
             "scripts/release/smoke.py",
@@ -196,6 +198,25 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(m, self.manifest)
         self.assertEqual(ci[0]["run_id"], 123)
         self.assertIn("policy.json", files)
+
+    def test_explicit_identity_pair_preserves_pinned_runners_and_one_context(self):
+        for component in ["api", "frontend"]:
+            key = "DruHustle/onesa-robot:" + component
+            self.policy["components"]["DruHustle/onesa-robot:identity-" + component] = (
+                json.loads(json.dumps(self.policy["components"][key]))
+            )
+        self.seal()
+        self.validate()
+        key = "DruHustle/onesa-robot:identity-api"
+        self.policy["components"][key]["qualification_attempt_limit"] = 2
+        self.seal()
+        with self.assertRaisesRegex(verifier.Rejected, "One initial context"):
+            self.validate()
+        self.policy["components"][key]["qualification_attempt_limit"] = 1
+        del self.policy["components"]["DruHustle/onesa-robot:identity-frontend"]
+        self.seal()
+        with self.assertRaisesRegex(verifier.Rejected, "explicit identity pair"):
+            self.validate()
 
     def test_tamper_wrong_pin_and_unreviewed_blob(self):
         self.put("oracle_owner.py", b"candidate replacement")

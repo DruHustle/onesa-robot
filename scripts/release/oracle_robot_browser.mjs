@@ -6,7 +6,7 @@ import { chromium, firefox, webkit, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 // Observe the single existing UI request. Journal acknowledgement can use the
 // client's ten-second transport budget before a dependent UI assertion begins.
-export async function observeSimulationAcknowledgement(page,path,action){
+export async function observeSimulationAcknowledgement(page,path,action,authenticationMethod='operator'){
  const statuses={'/api/v1/stop':'stopped','/api/v1/reset':'reset','/api/v1/auth/logout':'signed_out'};
  assert.ok(Object.hasOwn(statuses,path),'Unsupported simulation acknowledgement');
  const origin=new URL(page.url()).origin,started=performance.now();
@@ -17,7 +17,12 @@ export async function observeSimulationAcknowledgement(page,path,action){
  const [response]=await Promise.all([pending,action()]);
  assert.equal(response.status(),200,'Simulation acknowledgement HTTP status');
  const body=await response.json();
- assert.deepEqual(Object.keys(body).sort(),['physical_actuation','status']);
+ const keys=Object.keys(body).sort();
+ if(path==='/api/v1/auth/logout'&&Object.hasOwn(body,'identity_signed_out')){
+  assert.deepEqual(keys,['identity_signed_out','physical_actuation','status']);
+  assert.ok(body.identity_signed_out===null||typeof body.identity_signed_out==='boolean');
+ }else assert.deepEqual(keys,['physical_actuation','status']);
+ if(authenticationMethod==='onesa'&&path==='/api/v1/auth/logout')assert.equal(body.identity_signed_out,true,'Shared sign-out must be confirmed');
  assert.equal(body.status,statuses[path],'Simulation acknowledgement result');
  assert.equal(body.physical_actuation,false,'Physical actuation must remain disabled');
  return {path,http_status:200,status:body.status,physical_actuation:false,elapsed_ms:Math.round(performance.now()-started)};
@@ -36,29 +41,40 @@ export function observeSignInTransport(page,origin){
  page.on('response',observe);
  return ()=>{page.off('response',observe);return {state:'SIGN_IN_HTTP_DIAGNOSTIC_NOT_QUALIFICATION',responses,omitted};};
 }
+export function baseComponent(binding){
+ const component=binding.component;
+ assert.ok(['api','frontend','identity-api','identity-frontend'].includes(component));
+ return component.startsWith('identity-')?component.slice('identity-'.length):component;
+}
 export async function verifyAnonymousBoundary(page,request){
  assert.equal(request.binding.repository,'DruHustle/onesa-robot');
- assert.ok(['api','frontend'].includes(request.binding.component));
+ baseComponent(request.binding);
  assert.ok(['staging','production'].includes(request.environment));
  assert.equal(typeof request.read_only,'boolean');
  assert.ok(request.environment==='staging'||request.read_only===true);
  // API production retains an independently deployed frontend. Its established
  // task proxy must deny anonymous access; new mission routes are checked on the
  // actual API directly, and on every candidate/staged or new frontend below.
- const path=request.environment==='production'&&request.binding.component==='api'?'/api/v1/tasks':'/api/v1/missions';
+ const path=request.environment==='production'&&baseComponent(request.binding)==='api'?'/api/v1/tasks':'/api/v1/missions';
  const response=await page.request.get(request.origin+path,{maxRedirects:0});
  assert.equal(response.status(),401,'Anonymous boundary must deny access');
  return {path,http_status:401};
 }
 export async function checkUI(request,directory,engines={chromium,firefox,webkit}){
 let errors=0,replayRequests=0,violations=0;
+const apiOnly=Boolean(request.identity&&request.environment==='production'&&baseComponent(request.binding)==='api'&&request.read_only===true);
+const signInView=apiOnly?'#login-form:visible, #onesa-sign-in:visible':request.identity?'#onesa-sign-in':'#login-form';
 const results=[],authorizationChecks=[];
 const outcomes={normal:'Completed · normal readings',threshold:'Completed · findings to review',discrepancy:'Completed · findings to review',missing:'Completed · findings to review',stale:'Completed · findings to review',units:'Completed · findings to review',interrupted:'Interrupted · not completed'};
 const write=(name,value)=>fs.writeFileSync(directory+'/'+name,JSON.stringify(value),{flag:'wx',mode:0o600});
 for(const [engine,type] of Object.entries(engines)){
  const browser=await type.launch({headless:true});
  try{
-  const context=await browser.newContext({viewport:{width:390,height:844},colorScheme:'dark',reducedMotion:'reduce',extraHTTPHeaders:request.provider.bypass?{'x-vercel-protection-bypass':request.provider.bypass}:{}});
+  const context=await browser.newContext({viewport:{width:390,height:844},colorScheme:'dark',reducedMotion:'reduce',extraHTTPHeaders:!request.identity&&request.provider.bypass?{'x-vercel-protection-bypass':request.provider.bypass}:{}});
+  if(request.identity){
+   const {scopeIdentityRequests}=await import('./oracle_robot_identity_browser.mjs');
+   await scopeIdentityRequests(context,request.identity,request.provider.bypass);
+  }
   const page=await context.newPage();
   page.on('pageerror',()=>errors++);
   const publicResponses=[];
@@ -71,16 +87,21 @@ for(const [engine,type] of Object.entries(engines)){
   const signInTransport=observeSignInTransport(page,request.origin);
   try{
    await page.goto(request.origin+'/console');
-   await expect(page.locator('#login-form')).toBeVisible();
+   await expect(page.locator(signInView)).toBeVisible();
    authorizationChecks.push({engine,phase:'before_sign_in',...await verifyAnonymousBoundary(page,request)});
-   await page.locator('#name').fill(request.credentials.operator);
-   await page.locator('#password').fill(request.credentials.password);
-   await page.getByRole('button',{name:'Sign in',exact:true}).click();
+   if(request.identity){
+    const {signInIdentity}=await import('./oracle_robot_identity_browser.mjs');
+    await signInIdentity(page,context,request.identity,{robotBypass:request.provider.bypass,apiOnly});
+   }else{
+    await page.locator('#name').fill(request.credentials.operator);
+    await page.locator('#password').fill(request.credentials.password);
+    await page.getByRole('button',{name:'Sign in',exact:true}).click();
+   }
    // Observe the existing 20s readiness plus 10s credential-request budget.
    // This remains one submission; application and safety deadlines are unchanged.
    await expect(page.locator('#operator')).toBeVisible({timeout:30000});
   }finally{write(engine+'-sign-in-transport.json',signInTransport());}
-  if(request.read_only && request.binding.component==='frontend'){
+  if(request.read_only && baseComponent(request.binding)==='frontend'){
    await expect(page.locator('#mission-form')).toBeVisible();
    await expect(page.locator('#mission-scenario option')).toHaveCount(7);
    await expect(page.locator('#mission-readiness')).toContainText('Stopped');
@@ -92,15 +113,25 @@ for(const [engine,type] of Object.entries(engines)){
    // only to this bounded staging fixture's own session and completed runs.
    const stop=await observeSimulationAcknowledgement(page,'/api/v1/stop',()=>page.locator('#stop').click());
    write(engine+'-'+scenario+'-stop-acknowledgement.json',stop);
+   if(request.identity){
+    const response=await page.request.get(request.origin+'/api/v1/auth/me',{maxRedirects:0});
+    assert.equal(response.status(),200);const session=await response.json();
+    if(session.confirmation_expires_at<Date.now()/1000+60){
+     const {signInIdentity}=await import('./oracle_robot_identity_browser.mjs');
+     await signInIdentity(page,context,request.identity,{robotBypass:request.provider.bypass,stepUp:true});
+    }
+   }
    await expect(page.locator('#reset-form')).toBeVisible();
-   await page.locator('#reset-password').fill(request.credentials.password);
+   if(request.identity)await page.locator('#reset-password-confirmed').check();
+   else await page.locator('#reset-password').fill(request.credentials.password);
    const reset=await observeSimulationAcknowledgement(page,'/api/v1/reset',()=>page.locator('#reset-submit').click());
    write(engine+'-'+scenario+'-reset-acknowledgement.json',reset);
    await expect(page.locator('#mission-submit')).toBeEnabled();
    await page.locator('#mission-scenario').selectOption(scenario);
    await page.locator('#mission-submit').click();
    await expect(page.locator('#mission-steps li')).toHaveCount(5);
-   await page.locator('#mission-password').fill(request.credentials.password);
+   if(request.identity)await page.locator('#mission-password-confirmed').check();
+   else await page.locator('#mission-password').fill(request.credentials.password);
    await page.locator('#mission-approve-submit').click();
    await expect(page.locator('#mission-outcome')).toHaveText(outcomes[scenario],{timeout:20000});
    const mutations=[];
@@ -130,15 +161,15 @@ for(const [engine,type] of Object.entries(engines)){
    assert.equal(audit.violations.length,0);
   }
   await page.screenshot({path:directory+'/'+engine+'-operator.png',fullPage:true});
-  await observeSimulationAcknowledgement(page,'/api/v1/auth/logout',()=>page.locator('#logout').click());
-  await expect(page.locator('#login-form')).toBeVisible();
-  if(request.environment==='staging'||request.binding.component==='frontend')await expect(page.locator('#mission-readings')).toBeEmpty();
+  await observeSimulationAcknowledgement(page,'/api/v1/auth/logout',()=>page.locator('#logout').click(),request.identity?'onesa':'operator');
+  await expect(page.locator(signInView)).toBeVisible();
+  if(request.environment==='staging'||baseComponent(request.binding)==='frontend')await expect(page.locator('#mission-readings')).toBeEmpty();
   authorizationChecks.push({engine,phase:'after_logout',...await verifyAnonymousBoundary(page,request)});
   await context.close();
  }finally{await browser.close();}
 }
 assert.equal(errors,0);assert.equal(replayRequests,0);assert.equal(violations,0);
-const receipt={status:'PASS',binding:request.binding,environment:request.environment,engines:Object.keys(engines),results,authorization_checks:authorizationChecks,replay_operational_requests:replayRequests,javascript_errors:errors,accessibility_violations:violations,production_operational_mutations:0,observed_at:new Date().toISOString()};
+const receipt={status:'PASS',binding:request.binding,environment:request.environment,engines:Object.keys(engines),results,authorization_checks:authorizationChecks,replay_operational_requests:replayRequests,javascript_errors:errors,accessibility_violations:violations,production_operational_mutations:0,authentication_method:request.identity?'onesa':'operator',identity_entry:request.identity?(apiOnly?'api-pkce-retained-frontend':'product-ui-pkce'):null,observed_at:new Date().toISOString()};
 write('browser-receipt.json',receipt);return receipt;
 }
 

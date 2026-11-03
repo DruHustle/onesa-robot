@@ -116,6 +116,7 @@ class ProviderIntentTests(unittest.TestCase):
             (folder / "operations").mkdir()
             binding = {
                 "repository": "DruHustle/onesa-robot",
+                "component": "frontend",
                 "candidate_commit": "a" * 40,
             }
             plan = {
