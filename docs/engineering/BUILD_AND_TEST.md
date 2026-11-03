@@ -8,6 +8,27 @@ password suite remains required. Regenerate API schema and TypeScript types from
 source after changes; see [the identity contract](IDENTITY.md) for exact boundaries.
 These local checks do not assert that the hosted issuer or staging clients are active.
 
+The owner identity browser fixture uses a disposable loopback HTTPS server and a
+CONNECT proxy restricted to its two exact synthetic Portal and Robot hosts. Real
+302 responses exercise browser navigation and host-only Secure/HttpOnly cookie
+delivery in Chromium, Firefox and WebKit. Its ephemeral certificate is trusted only
+inside that test context; production origin, TLS and cookie guards are unchanged.
+The Node transport regression checks response bytes, both permitted hosts, rejected
+foreign authorities and shutdown. It does not replace the pinned browser matrix.
+The UI observer registers the successful main-frame start POST and actual issuer
+authorization GET before clicking. It validates client, callback, S256 challenge,
+nonce, state, scope and step-up fields on the actual browser request, then binds the
+callback to that transaction and requires the actual account, session and cookies.
+This observes protocol metadata that survives Chromium's document replacement;
+it installs no additional request route. The backend still binds the callback to
+its stored state, browser cookie and PKCE verifier. API-only acceptance parses the
+original JSON before its own navigation. Deterministic regressions cover unavailable
+UI response bodies, request boundaries and API-only behavior before credential entry.
+The same 18 identity cases run first in the native browser step for earlier failure
+feedback; the complete three-engine matrix remains mandatory afterward. A test-only
+observer reports fixed phase/error categories without exception text, URLs, queries,
+headers or session values, and preserves the original response and error objects.
+
 The NVIDIA reference-library build verifies all local GLBs, previews, source
 records and licenses against their manifest hashes and rejects external or active
 GLB resources. `tests/nvidia-assets.test.mjs` exercises actual asset integrity,
@@ -422,6 +443,40 @@ Unknown/unauthorized/malformed responses and another task never satisfy it.
 
 ## Idle journal recovery and Preview observation regressions
 
+The renewal boundary regression in `tests/test_turso_renewal.py` controls only
+the fake provider's SQLite clock. Setting a lease to exactly eighteen seconds
+and then observing it must not depend on crossing a real wall-clock second.
+An explicit one-second advance verifies that the same eighteen-second starting
+lease is refused once only seventeen seconds remain. The actual renewal SQL,
+ownership fence, no-write-replay assertion and monotonic HTTP deadlines remain
+unchanged. Run this file and `tests/test_lease_timing.py` before the full backend
+suite. This test correction does not identify or repair a hosted journal latch.
+
+`python3 -m unittest discover -s scripts/release -p test_oracle_robot_journal_diagnostic.py`
+uses a query-only SQLite fixture and mocked Docker/provider boundaries to verify
+the owner diagnostic's aggregate query, database-relative lease expiry, fixed log
+field redaction, current-process window, immutable installation pins, exact
+simulation configuration and before/after runtime identity. Unknown log values,
+missing evidence, private provider errors, malformed aggregates, concurrent
+changes and arbitrary SQL remain non-acceptance outcomes. Run the complete release
+requirement suite after changing the installer or shared journal query allowlist.
+
+For the explicit shared identity owner profile, run the release requirement suite,
+frontend unit tests and `tests/browser/owner-identity-flow.spec.mjs` in the pinned
+three-engine browser environment. The browser fixture exercises actual form and
+redirect navigation with synthetic Portal responses, including a second-step MFA
+prompt, changed account UUID, wrong callback state and stale confirmation. It is
+not hosted acceptance. The release tests reject an unbound source/tool archive,
+foreign issuer or callback, reused environment identities, unrelated runtime
+changes, expired custody, a rewritten cookie domain and unconfirmed global
+sign-out. The source closure must include every transitive identity helper.
+
+The backend `test_hosted_acceptance_executes_real_api_and_safety_flows` runs the
+same fourteen simulator/edge checks against actual local routes in both legacy
+and shared-identity modes. Its synthetic issuer drives the real callback state,
+session, confirmation, revocation and reconnect handlers. It cannot substitute
+for the commissioned owner's live Portal MFA, provider or email observations.
+
 Run `python -m pytest -q tests/test_idle_journal_recovery.py` in the backend
 environment, then the complete affected backend suite. The fake Turso HTTP
 boundary uses isolated SQLite and synthetic credentials; it never targets a cloud
@@ -487,6 +542,16 @@ and a loopback provider only. It exercises cold/warm upload negotiation, project
 resolution, immutable read-only credential custody and one-create request enforcement.
 That fixture supplies no production authority. Keep its original failed observations
 alongside a corrected result in the protected evidence index.
+
+`test_oracle_robot_identity_scopes.py` exercises separate native and identity
+candidate paths, exact paired sources, accepted native bridge chains and the
+identity frontend's lookup of the accepted identity API scope. The actual
+disposable signed owner ledger also checks that one source can qualify the four
+explicit components once each without renewing any component's allowance. Missing,
+revoked, changed or identity-enabled bridge evidence must fail. Browser fixtures
+in `owner-identity-flow.spec.mjs` cover both the product button and a same-origin
+API start followed by actual Portal forms and callback navigation; all three
+native engines remain required by CI and hosted acceptance.
 
 The pinned CLI protocol fixture asserts each actual outgoing `ROBOT_API_URL` value.
 The history/disclosure case must restore its own completed scenario's stopped state;

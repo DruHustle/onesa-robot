@@ -3,6 +3,15 @@ const {createGuard}=require('./oracle_vercel_transport_guard.cjs');
 const modulePath=path.join(__dirname,'oracle_vercel_transport_guard.cjs');
 function fixture(){const p=fs.mkdtempSync(path.join(os.tmpdir(),'onesa-transport-test-'));fs.chmodSync(p,0o700);fs.writeFileSync(path.join(p,'scope.json'),JSON.stringify({request_budget:1,operation_id:crypto.randomUUID(),repository:'DruHustle/onesa-robot',component:'frontend',environment:'staging'}),{mode:0o600});return p;}
 function child(code){return new Promise((resolve,reject)=>{const p=spawn(process.execPath,['-e',code],{stdio:'ignore'});p.on('error',reject);p.on('exit',code=>resolve(code));});}
+test('identity frontend keeps its distinct durable scope and the single create budget',()=>{
+ const p=fixture();try{
+  const scope=JSON.parse(fs.readFileSync(path.join(p,'scope.json')));scope.component='identity-frontend';fs.writeFileSync(path.join(p,'scope.json'),JSON.stringify(scope));
+  const check=createGuard(p);check('https://api.vercel.com','POST','/v13/deployments');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(p,'create-request.json'))).component,'identity-frontend');
+  assert.throws(()=>check('https://api.vercel.com','POST','/v13/deployments'));
+  for(const component of ['api','identity-api','identity-foreign']){scope.component=component;fs.writeFileSync(path.join(p,'scope.json'),JSON.stringify(scope));assert.throws(()=>createGuard(p));}
+ }finally{fs.rmSync(p,{recursive:true});}
+});
 test('the create budget survives process interruption and rejects a foreign target',()=>{
  const p=fixture();try{let check=createGuard(p);assert.throws(()=>check('https://foreign.invalid','POST','/v13/deployments'));check('https://api.vercel.com','POST','/v13/deployments?teamId=fixture');check('https://api.vercel.com','POST','/v2/files');check('https://api.vercel.com','GET','/v13/deployments');check=createGuard(p);assert.throws(()=>check('https://api.vercel.com','POST','/v13/deployments'));assert.equal(JSON.parse(fs.readFileSync(path.join(p,'create-request.json'))).automatic_retry,false);}finally{fs.rmSync(p,{recursive:true});}
 });

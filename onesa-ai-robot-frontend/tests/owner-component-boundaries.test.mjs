@@ -22,7 +22,10 @@ test('component-specific anonymous boundaries use actual HTTP and never fall bac
  try{
   assert.deepEqual(await verifyAnonymousBoundary({request:api},base),{path:'/api/v1/tasks',http_status:401});
   assert.deepEqual(calls,['/api/v1/tasks']);
-  for(const value of [{...base,binding:{...base.binding,component:'frontend'}},{...base,environment:'staging',read_only:false}]){
+  const identityApi={...base,binding:{...base.binding,component:'identity-api'}};
+  assert.deepEqual(await verifyAnonymousBoundary({request:api},identityApi),{path:'/api/v1/tasks',http_status:401});
+  assert.equal(identityApi.binding.component,'identity-api');
+  for(const value of [{...base,binding:{...base.binding,component:'frontend'}},{...base,binding:{...base.binding,component:'identity-frontend'}},{...base,environment:'staging',read_only:false},{...identityApi,environment:'staging',read_only:false}]){
    const before=calls.length;await assert.rejects(verifyAnonymousBoundary({request:api},value));assert.deepEqual(calls.slice(before),['/api/v1/missions']);
   }
   missionStatus=401;
