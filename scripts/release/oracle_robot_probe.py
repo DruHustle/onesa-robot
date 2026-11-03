@@ -49,7 +49,7 @@ def require(value):
 raw = sys.stdin.buffer.read(16385)
 require(len(raw) <= 16384)
 request = json.loads(raw)
-require(set(request) == {'origin', 'environment'})
+require(set(request) in ({'origin', 'environment'}, {'origin', 'environment', 'identity'}))
 require(re.fullmatch(r'https://onesa-ai-robot-git-staging-[a-z0-9-]+\\.vercel\\.app', request['origin']))
 values = request['environment']
 require(set(values) == {
@@ -63,16 +63,27 @@ require(values['ROBOT_PUBLIC_ORIGIN'] == request['origin'])
 require(values['ROBOT_STORAGE_MODE'] == 'turso')
 require(values['ROBOT_EDGE_DEVICE_ID'].startswith('synthetic-'))
 os.environ.update(values)
-print(json.dumps(run(request['origin'], 'Staging', oracle_staging_api='https://robot-api-staging.onesa.eu'), allow_nan=False))
+identity_login = None
+if 'identity' in request:
+    from oracle_robot_identity import acquire, attach
+    require(request['identity']['origin'] == request['origin'])
+    require(request['identity']['environment'] == 'staging')
+    def identity_login(api):
+        selected = {'identity': request['identity'], 'provider': {'bypass': values['VERCEL_AUTOMATION_BYPASS_SECRET']}}
+        return attach(api, acquire(selected, inside_image=True))
+print(json.dumps(run(request['origin'], 'Staging', oracle_staging_api='https://robot-api-staging.onesa.eu', identity_login=identity_login), allow_nan=False))
 """
 
 
 class API:
-    def __init__(self, origin, public_origin, credentials, bypass=None):
+    def __init__(
+        self, origin, public_origin, credentials, bypass=None, identity_request=None
+    ):
         self.origin = origin
         self.public = public_origin
         self.credentials = credentials
         self.bypass = bypass
+        self.identity_request = identity_request
         self.csrf = ""
         self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(
@@ -112,6 +123,16 @@ class API:
             return json.loads(raw) if raw else None
 
     def login(self):
+        if self.identity_request is not None:
+            import oracle_robot_identity as identity
+
+            r.require(
+                self.origin
+                == self.public
+                == self.identity_request["identity"]["origin"],
+                "IDENTITY_COOKIE_ORIGIN_MUST_NOT_BE_REWRITTEN",
+            )
+            return identity.attach(self, identity.acquire(self.identity_request))
         value = self.call(
             "/api/v1/auth/login",
             {
@@ -132,7 +153,12 @@ class API:
 
     def logout(self):
         if self.csrf:
-            self.call("/api/v1/auth/logout", {})
+            value = self.call("/api/v1/auth/logout", {})
+            if self.identity_request is not None:
+                r.require(
+                    value.get("identity_signed_out") is True,
+                    "IDENTITY_SIGNOUT_MUST_BE_CONFIRMED",
+                )
             self.csrf = ""
             self.call("/api/v1/auth/me", expected=401)
 
@@ -142,7 +168,7 @@ def validate_request(request):
     env = request["environment"]
     r.require(
         b["repository"] == "DruHustle/onesa-robot"
-        and b["component"] in ["api", "frontend"]
+        and b["component"] in r.COMPONENTS
         and env in ["staging", "production"],
         "HOSTED_PROBE_COMPONENT_SCOPE",
     )
@@ -192,11 +218,32 @@ def validate_request(request):
         and request["cpu_limit"] in ["1", "2"],
         "PINNED_BOUNDED_PROBE_IMAGE",
     )
+    r.require(
+        ("identity" in request) == (b["component"] in r.IDENTITY_COMPONENTS),
+        "IDENTITY_PROBE_REQUIRES_DISTINCT_COMPONENT_SCOPE",
+    )
+    if "identity" in request:
+        value = request["identity"]
+        r.require(
+            value["profile"] == "shared-identity-v1"
+            and value["environment"] == env
+            and value["origin"] == request["origin"]
+            and request.get("identity_api_only", False)
+            is (env == "production" and r.base_component(b) == "api"),
+            "SOURCE_BOUND_IDENTITY_PROBE_SCOPE",
+        )
     return env
 
 
 def readonly_api(request):
-    api = API(request["api_origin"], request["origin"], request["credentials"])
+    identity = request.get("identity")
+    api = API(
+        request["origin"] if identity else request["api_origin"],
+        request["origin"],
+        request["credentials"],
+        bypass=request["provider"].get("bypass") if identity else None,
+        identity_request=request if identity else None,
+    )
     ready = api.call("/api/v1/ready")
     r.require(
         ready["status"] == "ready"
@@ -240,6 +287,39 @@ def readonly_api(request):
             and permission["physical_actuation"] is False,
             "PHYSICAL_PERMISSION_MUST_REMAIN_BLOCKED",
         )
+        identity_roles = None
+        if identity:
+            ordinary = API(
+                request["origin"],
+                request["origin"],
+                {},
+                bypass=request["provider"].get("bypass"),
+                identity_request={**request, "identity_actor": "operator"},
+            )
+            ordinary.login()
+            try:
+                normal = ordinary.call("/api/v1/auth/me")
+                r.require(
+                    normal["role"] == "operator"
+                    and normal["authentication_method"] == "onesa"
+                    and normal["global_administrator"] is False,
+                    "NORMAL_IDENTITY_ROLE_REQUIRED",
+                )
+                ordinary.call("/api/v1/admin/physical-operation", expected=403)
+                for path in [
+                    "/api/v1/status",
+                    "/api/v1/missions/catalog",
+                    "/api/v1/missions",
+                    "/api/v1/tasks",
+                ]:
+                    ordinary.call(path)
+                identity_roles = {
+                    "administrator": "PASS",
+                    "operator": "PASS",
+                    "operator_admin_denial": 403,
+                }
+            finally:
+                ordinary.logout()
         return {
             "readiness": "PASS",
             "authentication": "PASS",
@@ -251,6 +331,7 @@ def readonly_api(request):
             "production_operational_mutations": 0,
             "mission_count": len(missions.get("missions", [])),
             "task_count": len(tasks["tasks"]),
+            **({"shared_identity_roles": identity_roles} if identity else {}),
         }
     finally:
         api.logout()
@@ -265,7 +346,7 @@ def verify_browser_authorization(value, request):
     path = (
         "/api/v1/tasks"
         if request["environment"] == "production"
-        and request["binding"]["component"] == "api"
+        and r.base_component(request["binding"]) == "api"
         else "/api/v1/missions"
     )
     rows = value.get("authorization_checks", [])
@@ -297,7 +378,8 @@ def browser(request):
                 "provider",
                 "read_only",
             ]
-        },
+        }
+        | ({"identity": request["identity"]} if "identity" in request else {}),
     )
     command = [
         "/usr/bin/docker",
@@ -357,6 +439,18 @@ def browser(request):
         and value["accessibility_violations"] == 0,
         "GENUINE_HOSTED_BROWSER_RECEIPT",
     )
+    if "identity" in request:
+        r.require(
+            value.get("authentication_method") == "onesa"
+            and value.get("identity_entry")
+            == (
+                "api-pkce-retained-frontend"
+                if request["environment"] == "production"
+                and r.base_component(request["binding"]) == "api"
+                else "product-ui-pkce"
+            ),
+            "GENUINE_IDENTITY_BROWSER_REQUIRED",
+        )
     return value
 
 
@@ -383,7 +477,10 @@ def staging_legacy(request):
         "ROBOT_EDGE_TOKEN": credential["edge_token"],
         "VERCEL_AUTOMATION_BYPASS_SECRET": request["provider"]["bypass"],
     }
-    raw = r.canonical({"origin": request["origin"], "environment": chosen})
+    payload = {"origin": request["origin"], "environment": chosen}
+    if "identity" in request:
+        payload["identity"] = request["identity"]
+    raw = r.canonical(payload)
     r.require(len(raw) <= 16384, "LEGACY_PRIVATE_INPUT_BOUND")
     result = subprocess.run(
         [
@@ -395,9 +492,11 @@ def staging_legacy(request):
             "never",
             "--read-only",
             "--tmpfs",
-            "/tmp:rw,mode=700,size=64m",
+            "/tmp:rw,mode=700,size=512m"
+            if "identity" in request
+            else "/tmp:rw,mode=700,size=64m",
             "--memory",
-            "256m",
+            "1400m" if "identity" in request else "256m",
             "--cpus",
             request["cpu_limit"],
             "--cap-drop",

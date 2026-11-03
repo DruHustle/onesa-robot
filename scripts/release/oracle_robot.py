@@ -46,6 +46,13 @@ if not VERIFIER.exists():
     VERIFIER = Path(__file__).resolve().parent.parent / "oracle_owner.py"
 OPENSSL = "/usr/bin/openssl" if sys.platform == "linux" else "/opt/homebrew/bin/openssl"
 CUSTODY = Path("/run/onesa-release/robot-operator.json")
+COMPONENTS = {
+    "api": "api",
+    "frontend": "frontend",
+    "identity-api": "api",
+    "identity-frontend": "frontend",
+}
+IDENTITY_COMPONENTS = {"identity-api", "identity-frontend"}
 
 
 class Refused(ValueError):
@@ -55,6 +62,21 @@ class Refused(ValueError):
 def require(value, code):
     if not value:
         raise Refused(code)
+
+
+def base_component(binding):
+    """Select implementation only; never rewrite an authority or artifact binding."""
+    component = binding["component"]
+    require(component in COMPONENTS, "ROBOT_COMPONENT_SCOPE")
+    return COMPONENTS[component]
+
+
+def plan_binding(plan, component):
+    require(component in {"api", "frontend"}, "ROBOT_DEPENDENCY_COMPONENT_SCOPE")
+    key = ("identity-" if plan.get("identity") is not None else "") + component
+    binding = plan["bindings"][key]
+    require(binding["component"] == key, "ROBOT_DEPENDENCY_PROFILE_MISMATCH")
+    return binding
 
 
 def now():
@@ -225,6 +247,26 @@ def summary(row):
         "environment_sha256": hashlib.sha256(
             "\n".join(sorted(row["Config"]["Env"])).encode()
         ).hexdigest(),
+    }
+
+
+def backend_runtime(row):
+    """Bind acceptance to the exact running configuration without disclosing it."""
+    configuration = {
+        "Config": row["Config"],
+        "HostConfig": row["HostConfig"],
+        "Mounts": row["Mounts"],
+        "Networks": {
+            name: network["NetworkID"]
+            for name, network in row["NetworkSettings"]["Networks"].items()
+        },
+    }
+    return {
+        "container_id": row["Id"],
+        "image_id": row["Image"],
+        "source_commit": row["Config"].get("Labels", {}).get("org.onesa.source-commit")
+        or row["Config"].get("Labels", {}).get("org.opencontainers.image.revision"),
+        "configuration_sha256": hashlib.sha256(canonical(configuration)).hexdigest(),
     }
 
 
@@ -710,7 +752,7 @@ CHECKS = {
 def verify_toolchain(plan, binding, *, observer=None):
     require(
         binding["repository"] == "DruHustle/onesa-robot"
-        and binding["component"] in ["api", "frontend"]
+        and binding["component"] in COMPONENTS
         and binding["target_environment"] == "production",
         "ROBOT_COMPONENT_SCOPE",
     )
@@ -773,7 +815,7 @@ def verify_toolchain(plan, binding, *, observer=None):
         runner = profile["runners"][phase]
         script = (
             "oracle_robot.py"
-            if binding["component"] == "api"
+            if base_component(binding) == "api"
             else "oracle_robot_frontend.py"
         )
         path = Path(__file__).with_name(script)
@@ -794,7 +836,7 @@ def verify_toolchain(plan, binding, *, observer=None):
 
 def component_folder(binding):
     require(
-        binding["component"] in ["api", "frontend"]
+        binding["component"] in COMPONENTS
         and re.fullmatch("[a-f0-9]{40}", binding["candidate_commit"]),
         "COMPONENT_ARTIFACT_SCOPE",
     )
@@ -809,11 +851,13 @@ def candidate_environment(binding, env):
         env in ENV and re.fullmatch("[a-f0-9]{40}", binding["candidate_commit"]),
         "CANDIDATE_ENVIRONMENT_SCOPE",
     )
-    return (
-        Path("/etc/onesa/backends/candidates")
-        / binding["candidate_commit"]
-        / ("robot-" + env + ".env")
-    )
+    base_component(binding)
+    root = Path("/etc/onesa/backends/candidates") / binding["candidate_commit"]
+    if binding["component"] in IDENTITY_COMPONENTS:
+        # The paired frontend consumes its independently accepted identity API
+        # configuration. Native bridge bytes remain in their original location.
+        root /= "identity-api"
+    return root / ("robot-" + env + ".env")
 
 
 def verify_application_bytes(folder, binding):
@@ -899,18 +943,20 @@ def frontend_configuration(binding, env):
         env in ENV and re.fullmatch("[a-f0-9]{40}", binding["candidate_commit"]),
         "FRONTEND_CONFIGURATION_SCOPE",
     )
-    return (
-        Path("/etc/onesa/backends/candidates")
-        / binding["candidate_commit"]
-        / ("robot-frontend-" + env + ".json")
-    )
+    base_component(binding)
+    root = Path("/etc/onesa/backends/candidates") / binding["candidate_commit"]
+    if binding["component"] in IDENTITY_COMPONENTS:
+        root /= "identity-frontend"
+    return root / ("robot-frontend-" + env + ".json")
 
 
 def frontend_configuration_value(plan, env):
     return {
         "schema_version": 1,
         "repository": "DruHustle/onesa-robot",
-        "component": "frontend",
+        "component": "identity-frontend"
+        if plan.get("identity") is not None
+        else "frontend",
         "environment": env,
         "project_id": plan["project_id"],
         "team_id": plan["team_id"],
@@ -924,6 +970,8 @@ def frontend_configuration_value(plan, env):
 
 
 def validate_plan(binding, *, observer=None):
+    import oracle_robot_identity as identity
+
     plan = read(PLAN) if observer is None else observer.original_plan()
     require(
         plan["schema_version"] == 1
@@ -943,6 +991,13 @@ def validate_plan(binding, *, observer=None):
     tool = verify_toolchain(
         plan, binding, **({"observer": observer} if observer is not None else {})
     )
+    identity_profile = identity.profile(plan, binding, tool)
+    require(
+        observer is None or identity_profile is None,
+        "LEGACY_OBSERVER_CANNOT_CLAIM_IDENTITY_QUALIFICATION",
+    )
+    if identity_profile is not None:
+        identity.native_bridge(plan, binding)
     folder = component_folder(binding)
     require(
         sha(private(folder / "source.tar")) == binding["source_sha256"],
@@ -953,8 +1008,8 @@ def validate_plan(binding, *, observer=None):
     for env, runtime_path in ENV.items():
         dependency_binding = (
             plan["independent_api"][env + "_binding"]
-            if binding["component"] == "frontend" and "independent_api" in plan
-            else plan["bindings"]["api"]
+            if base_component(binding) == "frontend" and "independent_api" in plan
+            else plan_binding(plan, "api")
         )
         prepared = private(candidate_environment(binding, env))
         current = runtime_values(runtime_path)
@@ -973,6 +1028,7 @@ def validate_plan(binding, *, observer=None):
             "RUNTIME_CONFIGURATION_CHANGED",
         )
         allowed = {"ROBOT_PUBLIC_ORIGIN"} if env == "staging" else set()
+        allowed |= identity.configuration(identity_profile, env, values)
         require(
             observer is not None
             and env == "staging"
@@ -1010,7 +1066,7 @@ def validate_plan(binding, *, observer=None):
         ),
         "STAGING_AND_PRODUCTION_IDENTITIES_MUST_REMAIN_SEPARATE",
     )
-    if binding["component"] == "api":
+    if base_component(binding) == "api":
         require(
             sha(private(folder / "image.tar.gz")) == binding["build_sha256"],
             "BUILD_ARCHIVE_DIGEST",
@@ -1041,6 +1097,8 @@ def validate_plan(binding, *, observer=None):
     )
     if observer is None:
         credentials(plan, binding)
+        if identity_profile is not None:
+            identity.credentials(plan, binding)
     else:
         observer.production_credentials()
     return folder, plan
@@ -1168,6 +1226,9 @@ def probe_source_files(files):
     names = {
         "scripts/release/oracle_robot_probe.py",
         "scripts/release/oracle_robot_browser.mjs",
+        "scripts/release/oracle_robot_identity.py",
+        "scripts/release/oracle_robot_identity_browser.mjs",
+        "scripts/release/oracle_robot.py",
         "onesa-ai-robot-frontend/package.json",
         "onesa-ai-robot-frontend/package-lock.json",
         "scripts/release/smoke.py",
@@ -1267,6 +1328,21 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+JOURNAL_DIAGNOSTIC_SQL = (
+    "SELECT count(*) AS tasks,"
+    "count(CASE WHEN state='proposed' THEN 1 END) AS proposed,"
+    "count(CASE WHEN state='running' THEN 1 END) AS running,"
+    "count(CASE WHEN state='completed' THEN 1 END) AS completed,"
+    "count(CASE WHEN state='cancelled' THEN 1 END) AS cancelled,"
+    "(SELECT count(*) FROM robot_simulation_lease_v1) AS lease_rows,"
+    "(SELECT count(*) FROM robot_simulation_lease_v1 WHERE id=1 "
+    "AND typeof(owner)='text' AND length(owner)=32 "
+    "AND owner NOT GLOB '*[^0-9a-f]*' AND typeof(expires)='integer') AS valid_leases,"
+    "(SELECT expires-unixepoch() FROM robot_simulation_lease_v1 WHERE id=1) "
+    "AS lease_remaining_seconds FROM robot_simulation_tasks_v1"
+)
+
+
 def journal(env, sql):
     """Read-only complete seven-column history; never a lease repair or SQL write."""
     require(env in ENV, "JOURNAL_ENVIRONMENT")
@@ -1279,6 +1355,7 @@ def journal(env, sql):
     )
     require(url == expected, "EXISTING_JOURNAL_TARGET_REQUIRED")
     allowed = {
+        JOURNAL_DIAGNOSTIC_SQL,
         "SELECT id,owner,proposal,state,reason,CASE WHEN typeof(created)='real' THEN printf('%!.26g',created) WHEN typeof(created)='integer' THEN created ELSE NULL END AS created,CASE WHEN typeof(position)='real' THEN printf('%!.26g',position) WHEN typeof(position)='integer' THEN position ELSE NULL END AS position FROM robot_simulation_tasks_v1 ORDER BY id",
         "SELECT owner,expires FROM robot_simulation_lease_v1 WHERE id=1",
         "SELECT sql FROM sqlite_master WHERE name IN ('robot_simulation_tasks_v1','robot_simulation_lease_v1') ORDER BY name",
@@ -1358,21 +1435,21 @@ def local_identity(binding, env, plan):
     row = inventory()[TARGET[env]]
     dependency = (
         plan["independent_api"][env + "_binding"]
-        if binding["component"] == "frontend" and "independent_api" in plan
+        if base_component(binding) == "frontend" and "independent_api" in plan
         else None
     )
     expected = (
         dependency["artifact_digest"]
         if dependency is not None
         else binding["artifact_digest"]
-        if binding["component"] == "api"
+        if base_component(binding) == "api"
         else plan["retained_api"]["image"]
     )
     source = (
         dependency["candidate_commit"]
         if dependency is not None
         else binding["candidate_commit"]
-        if binding["component"] == "api"
+        if base_component(binding) == "api"
         else plan["retained_api"]["source"]
     )
     require(
@@ -1392,7 +1469,7 @@ def local_identity(binding, env, plan):
         all(values.get(k) == v for k, v in prepared.items()),
         "RUNNING_CONFIGURATION_MISMATCH",
     )
-    if binding["component"] == "api":
+    if base_component(binding) == "api":
         verify_application_bytes(component_folder(binding), binding)
     return summary(row)
 
@@ -1400,6 +1477,12 @@ def local_identity(binding, env, plan):
 def authenticated_state(binding, env, plan):
     """Read only: never stop, reset, cancel or fence pre-existing work."""
     import http.cookiejar
+
+    if runtime_values(ENV[env]).get("ONESA_IDENTITY_ENABLED") == "true":
+        import oracle_robot_identity as identity
+
+        require(plan.get("identity") is not None, "EXPLICIT_IDENTITY_PROFILE_REQUIRED")
+        return identity.authenticated_state(plan, binding, env)
 
     values = credentials(plan, binding)[env]
     origin = runtime_values(ENV[env])["ROBOT_PUBLIC_ORIGIN"]
@@ -1457,7 +1540,7 @@ def authenticated_state(binding, env, plan):
 def preflight(binding):
     _folder, plan = validate_plan(binding)
     before = inventory()
-    frontend = binding["component"] == "frontend"
+    frontend = base_component(binding) == "frontend"
     if frontend:
         # The API release precedes independent frontend qualification. Require
         # its genuine accepted chain, then inspect both actual API runtimes.
@@ -1468,7 +1551,7 @@ def preflight(binding):
     for env in ENV:
         if frontend:
             local_identity(
-                binding if "independent_api" in plan else plan["bindings"]["api"],
+                binding if "independent_api" in plan else plan_binding(plan, "api"),
                 env,
                 plan,
             )
@@ -1525,7 +1608,7 @@ def activate(binding, env, operation, folder, plan):
     require(
         str(UUID(operation)) == operation
         and env in ENV
-        and binding["component"] == "api",
+        and base_component(binding) == "api",
         "API_DEPLOYMENT_SCOPE",
     )
     with provider_lock():
@@ -1642,7 +1725,7 @@ RECOVERY_PROGRAM = "import json,time,secrets,tempfile,sqlite3\nfrom pathlib impo
 
 
 def schema_recovery(binding, folder):
-    require(binding["component"] == "api", "API_SCHEMA_RECOVERY_ONLY")
+    require(base_component(binding) == "api", "API_SCHEMA_RECOVERY_ONLY")
     raw = docker(
         "run",
         "--rm",
@@ -1746,7 +1829,7 @@ def qualified_staging_observation(binding, plan, folder, context_id, qualificati
     )
     import oracle_robot_frontend as frontend
 
-    frontend_binding = plan["bindings"]["frontend"]
+    frontend_binding = plan_binding(plan, "frontend")
     preview = (
         component_folder(frontend_binding)
         / "operations"
@@ -1841,8 +1924,8 @@ def operational_observations(binding, plan, folder, context_id, *, qualification
     require(
         json.loads(docker("image", "inspect", rollback["image"]))[0]["Id"]
         == rollback["image"]
-        and rollback["image"] == plan["bindings"]["api"]["artifact_digest"]
-        and rollback["source"] == plan["bindings"]["api"]["candidate_commit"]
+        and rollback["image"] == plan_binding(plan, "api")["artifact_digest"]
+        and rollback["source"] == plan_binding(plan, "api")["candidate_commit"]
         and rollback["journal_schema"] == "robot_simulation_tasks_v1/seven-fields"
         and rollback["mode"] == "preserve-qualified-api-and-journal-roll-forward-only"
         and rollback["automatic_rollback"] is False,
@@ -1897,6 +1980,12 @@ def probe(binding, env, operation, folder, plan, *, read_only=False, observer=No
     output = folder / "observations" / operation
     output.mkdir(mode=0o700, exist_ok=False)
     observed = local_identity(binding, env, plan)
+    runtime_before = inventory()[TARGET[env]]
+    require(
+        healthy(runtime_before) and summary(runtime_before) == observed,
+        "HOSTED_PROBE_RUNTIME_CHANGED_BEFORE_ACCEPTANCE",
+    )
+    runtime = backend_runtime(runtime_before)
     request = {
         "binding": binding,
         "environment": env,
@@ -1922,9 +2011,16 @@ def probe(binding, env, operation, folder, plan, *, read_only=False, observer=No
         **({"observer": observer} if observer is not None else {}),
     )
     request["provider"] = provider
+    if plan.get("identity") is not None:
+        import oracle_robot_identity as identity
+
+        request["identity"] = identity.request(plan, binding, env)
+        request["identity_api_only"] = (
+            env == "production" and base_component(binding) == "api"
+        )
     request["expected_frontend_source"] = (
         binding["candidate_commit"]
-        if env == "staging" or binding["component"] == "frontend"
+        if env == "staging" or base_component(binding) == "frontend"
         else plan["retained_frontend"]["source"]
     )
     request["existing_history"] = history(env)
@@ -1934,7 +2030,7 @@ def probe(binding, env, operation, folder, plan, *, read_only=False, observer=No
     spec.loader.exec_module(module)
     value = module.execute(request)
     if env == "staging":
-        api_binding = plan["bindings"]["api"]
+        api_binding = plan_binding(plan, "api")
         recovery = schema_recovery(api_binding, component_folder(api_binding))
         schema = journal(
             env,
@@ -1955,7 +2051,26 @@ def probe(binding, env, operation, folder, plan, *, read_only=False, observer=No
         "HOSTED_ROBOT_ACCEPTANCE_FAILED",
     )
     preserved(request["existing_history"], history(env))
+    runtime_after = inventory()[TARGET[env]]
+    require(
+        healthy(runtime_after)
+        and summary(runtime_after) == observed
+        and backend_runtime(runtime_after) == runtime,
+        "HOSTED_PROBE_RUNTIME_CHANGED_DURING_ACCEPTANCE",
+    )
     value["actual_runtime"] = observed
+    value["backend_runtime"] = runtime
+    value["frontend"] = {
+        "deployment_id": provider["provider"]["deployment_id"],
+        "source_commit": provider["provider"]["source"],
+        "origin": provider["origin"],
+    }
+    if base_component(binding) == "frontend":
+        require(
+            re.fullmatch(r"dpl_[A-Za-z0-9]{8,128}", value["frontend"]["deployment_id"]),
+            "ACTUAL_FRONTEND_DEPLOYMENT_ID_REQUIRED",
+        )
+        value["deployment_id"] = value["frontend"]["deployment_id"]
     value["existing_records_preserved"] = True
     write(output / "receipt.json", value)
     return value
@@ -2047,9 +2162,9 @@ def runner(phase, binding, context, *, observer=None):
         preview = frontend.prepare_preview(binding, context, plan)
         plan["preview_receipt_path"] = str(preview)
         frontend.verify_static(
-            plan["bindings"]["frontend"],
+            plan_binding(plan, "frontend"),
             "staging",
-            component_folder(plan["bindings"]["frontend"]),
+            component_folder(plan_binding(plan, "frontend")),
             plan,
             context_id,
         )

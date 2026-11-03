@@ -19,12 +19,14 @@ class BrowserAuthorizationTests(unittest.TestCase):
 
     def test_only_api_production_observes_retained_legacy_proxy(self):
         for environment in ["staging", "production"]:
-            for component in ["api", "frontend"]:
+            for component in r.COMPONENTS:
                 request = {
                     "environment": environment,
                     "binding": {"component": component},
                 }
-                legacy = environment == "production" and component == "api"
+                legacy = (
+                    environment == "production" and r.COMPONENTS[component] == "api"
+                )
                 expected = "/api/v1/tasks" if legacy else "/api/v1/missions"
                 probe.verify_browser_authorization(self.receipt(expected), request)
                 with self.assertRaises(r.Refused):

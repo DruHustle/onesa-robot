@@ -140,7 +140,7 @@ def protection(plan):
 
 def validate(binding):
     folder, plan = r.validate_plan(binding)
-    r.require(binding["component"] == "frontend", "FRONTEND_COMPONENT_SCOPE")
+    r.require(r.base_component(binding) == "frontend", "FRONTEND_COMPONENT_SCOPE")
     if "independent_api" in plan:
         independent_api(plan, binding)
     protection(plan)
@@ -324,17 +324,24 @@ def observe_provider(binding, env, plan, operation, *, observer=None):
     else:
         identifier = (
             plan.get("current_frontend_deployment_id")
-            if binding["component"] == "frontend"
+            if r.base_component(binding) == "frontend"
             else recovered_frontend["deployment_id"]
             if recovered_frontend is not None
             else cfg["production_deployment_id"]
         )
         source = (
             binding["candidate_commit"]
-            if binding["component"] == "frontend"
+            if r.base_component(binding) == "frontend"
             else plan["retained_frontend"]["source"]
         )
         origin = "https://robot.onesa.eu"
+        if binding["component"] == "identity-api":
+            baseline = plan["identity"]["environments"][env]["baseline_frontend"]
+            r.require(
+                identifier == baseline["deployment_id"]
+                and source == baseline["source"],
+                "ACCEPTED_NATIVE_BRIDGE_MUST_SERVE_IDENTITY_API_ACCEPTANCE",
+            )
     dep = provider("/v13/deployments/" + identifier)
     actual = dep.get("meta", {}).get("githubCommitSha") or dep.get("gitSource", {}).get(
         "sha"
@@ -417,7 +424,7 @@ def create(binding, env, operation, folder, plan):
         transport / "scope.json",
         {
             "repository": binding["repository"],
-            "component": "frontend",
+            "component": binding["component"],
             "candidate_commit": binding["candidate_commit"],
             "environment": env,
             "operation_id": operation,
@@ -569,7 +576,7 @@ def create(binding, env, operation, folder, plan):
 
 
 def prepare_preview(api_binding, context, api_plan):
-    binding = api_plan["bindings"]["frontend"]
+    binding = r.plan_binding(api_plan, "frontend")
     r.require(
         all(
             binding[k] == api_binding[k]
@@ -741,13 +748,13 @@ def independent_api(plan, frontend_binding):
 def accepted_api(plan):
     if "independent_api" in plan:
         return independent_api(plan, plan["bindings"]["frontend"])
-    binding = plan["bindings"]["api"]
+    binding = r.plan_binding(plan, "api")
     store = r.private(Path(plan["verifier_store"]), directory=True)
     db = sqlite3.connect("file:" + str(store / "records.sqlite") + "?mode=ro", uri=True)
     try:
         row = db.execute(
             "SELECT d.id FROM deployments d JOIN records x ON x.id=d.id WHERE d.state='accepted' AND x.scope=? ORDER BY x.sequence DESC LIMIT 1",
-            (binding["repository"] + ":api",),
+            (binding["repository"] + ":" + binding["component"],),
         ).fetchone()
     finally:
         db.close()

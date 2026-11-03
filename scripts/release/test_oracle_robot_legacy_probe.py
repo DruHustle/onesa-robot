@@ -175,6 +175,7 @@ class LegacyImageTests(unittest.TestCase):
         ]
         names += [
             "scripts/release/oracle_robot_browser.mjs",
+            "scripts/release/oracle_robot_identity_browser.mjs",
             "onesa-ai-robot-frontend/package.json",
             "onesa-ai-robot-frontend/package-lock.json",
         ]
@@ -207,6 +208,7 @@ class LegacyImageTests(unittest.TestCase):
                 self.request["origin"],
                 "Staging",
                 oracle_staging_api="https://robot-api-staging.onesa.eu",
+                identity_login=None,
             )
         self.assertEqual(json.loads(output.getvalue()), self.result)
 

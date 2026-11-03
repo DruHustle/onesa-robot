@@ -3,6 +3,7 @@
 import asyncio
 import sqlite3
 import time
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -80,16 +81,23 @@ def test_uncertain_or_short_lived_lease_cannot_refresh_authority(remote, uncerta
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("remaining,accepted", [(20, True), (18, True), (17, False)])
-def test_uncommitted_renewal_observes_only_safely_remaining_ownership(remote, remaining, accepted):
+@pytest.mark.parametrize(
+    "remaining,elapsed,accepted", [(20, 0, True), (18, 0, True), (17, 0, False), (18, 1, False)]
+)
+def test_uncommitted_renewal_observes_only_safely_remaining_ownership(
+    remote, remaining, elapsed, accepted
+):
     path, network = remote
     statements = []
+    clock = SimpleNamespace(now=2_000_000_000)
+    network["database_clock"] = lambda: clock.now
 
     def lose_request(sql):
         statements.append(sql)
         if sql.startswith(f"UPDATE {LEASE}"):
             # The provider never executes this renewal. Reconciliation must
             # neither assume it committed nor rewrite the existing expiry.
+            clock.now += elapsed
             raise httpx.ReadTimeout("synthetic-private-request")
 
     async def run():
@@ -97,7 +105,7 @@ def test_uncommitted_renewal_observes_only_safely_remaining_ownership(remote, re
         try:
             await journal.initialize()
             with sqlite3.connect(path) as db:
-                db.execute(f"UPDATE {LEASE} SET expires=unixepoch()+?", (remaining,))
+                db.execute(f"UPDATE {LEASE} SET expires=?", (clock.now + remaining,))
                 before = db.execute(f"SELECT owner,expires FROM {LEASE}").fetchone()
             network["before_execute"] = lose_request
             if accepted:

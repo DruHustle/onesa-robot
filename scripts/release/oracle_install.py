@@ -25,6 +25,8 @@ ALLOWED = {
     "runners/oracle_robot.py": "scripts/release/oracle_robot.py",
     "runners/oracle_frontend_repair_dependency.py": "scripts/release/oracle_frontend_repair_dependency.py",
     "runners/oracle_robot_recovery.py": "scripts/release/oracle_robot_recovery.py",
+    "runners/oracle_robot_journal_diagnostic.py": "scripts/release/oracle_robot_journal_diagnostic.py",
+    "runners/oracle_robot_identity.py": "scripts/release/oracle_robot_identity.py",
     "runners/oracle_operator_custody.py": "scripts/release/oracle_operator_custody.py",
     "runners/oracle_robot_probe.py": "scripts/release/oracle_robot_probe.py",
     "runners/oracle_robot_frontend.py": "scripts/release/oracle_robot_frontend.py",
@@ -126,8 +128,16 @@ def validate(bundle, manifest_pin, github, *, uid=0):
     )
     require(
         set(policy["components"])
-        == {"DruHustle/onesa-robot:api", "DruHustle/onesa-robot:frontend"},
-        "Only the reviewed Robot API and frontend profiles are eligible",
+        in [
+            {"DruHustle/onesa-robot:api", "DruHustle/onesa-robot:frontend"},
+            {
+                "DruHustle/onesa-robot:api",
+                "DruHustle/onesa-robot:frontend",
+                "DruHustle/onesa-robot:identity-api",
+                "DruHustle/onesa-robot:identity-frontend",
+            },
+        ],
+        "Only the reviewed native pair and explicit identity pair are eligible",
     )
     # This source archive is data. Reconstruct its Git tree before using any
     # derived probe-code pins. All executable bootstrap modules were compared to
@@ -180,10 +190,10 @@ def validate(bundle, manifest_pin, github, *, uid=0):
         "Literal immutable tool image pins required",
     )
     target = INSTALL_PARENT / ("robot-" + m["source_tree"])
-    for component, script in [
-        ("api", "oracle_robot.py"),
-        ("frontend", "oracle_robot_frontend.py"),
-    ]:
+    for component, base in module.COMPONENTS.items():
+        if m["repository"] + ":" + component not in policy["components"]:
+            continue
+        script = "oracle_robot.py" if base == "api" else "oracle_robot_frontend.py"
         profile = policy["components"][m["repository"] + ":" + component]
         probe = {
             "repository": m["repository"],

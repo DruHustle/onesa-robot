@@ -46,6 +46,15 @@ for(const [path,result]of [['/api/v1/reset','reset'],['/api/v1/auth/logout','sig
  });
 }
 
+for(const revoked of [true,false,null])test(`shared logout requires confirmed central revocation (${revoked})`,async({page})=>{
+ const path='/api/v1/auth/logout';
+ const count=await fixture(page,path,{body:{status:'signed_out',physical_actuation:false,identity_signed_out:revoked}});
+ const observed=observe(page,path,()=>page.locator('#act').click(),'onesa');
+ if(revoked===true)expect((await observed).status).toBe('signed_out');
+ else await expect(observed).rejects.toThrow('Shared sign-out must be confirmed');
+ expect(count()).toBe(1);
+});
+
 for(const [label,options]of [['failed HTTP',{status:503}],['wrong state',{body:{status:'ready',physical_actuation:false}}],['physical activation',{body:{status:'stopped',physical_actuation:true}}],['incomplete body',{body:{status:'stopped'}}]]){
  test(`${label} cannot satisfy the acknowledgement`,async({page})=>{
   const count=await fixture(page,'/api/v1/stop',options);
