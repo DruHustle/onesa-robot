@@ -3,6 +3,7 @@
 import asyncio
 import sqlite3
 import time
+from uuid import uuid4
 
 import pytest
 from pydantic import SecretStr
@@ -231,6 +232,42 @@ def test_after_recovery_old_browser_session_is_refused_and_password_login_is_req
         login(api)
         assert api.get("/api/v1/status").json()["stopped"] is True
         assert api.get("/api/v1/tasks").json()["tasks"] == []
+
+
+@pytest.mark.parametrize("terminal", ["completed", "cancelled"])
+def test_cancelling_terminal_task_after_latch_does_not_poison_idle_recovery(
+    remote, tmp_path, terminal
+):
+    path, _ = remote
+    with client(config(tmp_path)) as api:
+        login(api)
+        sim = api.app.state.sim
+        task_id = str(uuid4())
+
+        async def seed():
+            sim.db.execute(
+                "INSERT INTO tasks VALUES(?,?,?,?,?,?,?)",
+                (task_id, "operator", "{}", terminal, "", 1.5, 0.25),
+            )
+            sim.db.commit()
+            sim.dirty(task_id)
+            await sim.flush_journal()
+
+        api.portal.call(seed)
+        baseline = history(path)
+        api.portal.call(lambda: fail(sim))
+        assert sim.journal_recovery_allowed and not sim.journal_dirty
+        # The route remains unavailable while the journal is latched; an already
+        # terminal task does not become a new, unacknowledged history mutation.
+        assert api.post(f"/api/v1/tasks/{task_id}/cancel").status_code == 503
+        assert not sim.journal_dirty
+        expire(path)
+        api.portal.call(lambda: setattr(sim, "journal_recovery_next_at", 0))
+        assert api.portal.call(sim.recover_idle_journal)
+        assert history(path) == baseline
+        assert api.portal.call(
+            lambda: sim.stopped and sim.active is None and not sim.journal_failed
+        )
 
 
 def test_unacknowledged_local_terminal_change_stays_latched_without_a_database_request(
