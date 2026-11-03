@@ -15,6 +15,10 @@ delivery in Chromium, Firefox and WebKit. Its ephemeral certificate is trusted o
 inside that test context; production origin, TLS and cookie guards are unchanged.
 The Node transport regression checks response bytes, both permitted hosts, rejected
 foreign authorities and shutdown. It does not replace the pinned browser matrix.
+The identity observer begins capturing the start-response body when it arrives,
+before awaiting UI click completion, and validates it before Portal credential entry.
+A deterministic ordering regression makes that body unavailable after navigation;
+origin, PKCE, status and credential-entry guards remain.
 
 The NVIDIA reference-library build verifies all local GLBs, previews, source
 records and licenses against their manifest hashes and rejects external or active

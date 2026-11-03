@@ -109,26 +109,25 @@ export async function signInIdentity(page,context,identity,{actor='administrator
   await scopeIdentityRequests(context,identity,robotBypass);
   requireValue(new URL(page.url()).origin===robot);
   requireValue(typeof apiOnly==='boolean'&&(!apiOnly||!stepUp));
-  let response;
+  // Begin body capture when the response arrives. Waiting for the UI click
+  // first can let cross-origin navigation finish before body capture starts.
+  const start=page.waitForResponse(value=>value.request().method()==='POST'&&value.url()===robot+'/api/v1/auth/identity/start',{timeout:15000}).then(async response=>{
+   requireValue(response.status()===200);
+   return validateAuthorization((await response.json()).authorization_url,identity,stepUp);
+  });
+  start.catch(()=>{}); // Early click/form failure must not leak an observer rejection.
   if(apiOnly){
    // API acceptance can precede the independently deployed product UI. This
    // still creates a real browser-bound PKCE transaction on the product origin.
-   const start=page.waitForResponse(value=>value.request().method()==='POST'&&value.url()===robot+'/api/v1/auth/identity/start',{timeout:15000});
-   start.catch(()=>{});
    await page.evaluate(async()=>{
     const result=await fetch('/api/v1/auth/identity/start',{method:'POST',mode:'same-origin',credentials:'same-origin',redirect:'error',headers:{'Content-Type':'application/json'},body:JSON.stringify({step_up:false}),signal:AbortSignal.timeout(15000)});
     if(!result.ok)throw new Error('IDENTITY_START_REFUSED');
     await result.arrayBuffer();
    });
-   response=await start;
   }else{
-   const start=page.waitForResponse(value=>value.request().method()==='POST'&&value.url()===robot+'/api/v1/auth/identity/start',{timeout:15000});
-   start.catch(()=>{}); // A failed click must not leak a later unhandled observer error.
    await page.locator(stepUp?'#onesa-confirm-identity':'#onesa-sign-in-button').click();
-   response=await start;
   }
-  requireValue(response.status()===200);
-  const authorization=validateAuthorization((await response.json()).authorization_url,identity,stepUp);
+  const authorization=await start;
   const callback=page.waitForRequest(request=>{
    const target=new URL(request.url());return target.origin===robot&&target.pathname==='/api/v1/auth/identity/callback';
   },{timeout:90000});
