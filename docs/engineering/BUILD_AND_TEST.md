@@ -19,6 +19,10 @@ The identity observer begins capturing the start-response body when it arrives,
 before awaiting UI click completion, and validates it before Portal credential entry.
 A deterministic ordering regression makes that body unavailable after navigation;
 origin, PKCE, status and credential-entry guards remain.
+The same 18 identity cases run first in the native browser step for earlier failure
+feedback; the complete three-engine matrix remains mandatory afterward. A test-only
+observer reports fixed phase/error categories without exception text, URLs, queries,
+headers or session values, and preserves the original response and error objects.
 
 The NVIDIA reference-library build verifies all local GLBs, previews, source
 records and licenses against their manifest hashes and rejects external or active

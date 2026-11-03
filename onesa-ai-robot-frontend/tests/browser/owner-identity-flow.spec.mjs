@@ -5,6 +5,7 @@ import {dirname,join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
 import {identityTransport,robotOrigin,portalOrigin} from './owner-identity-transport.mjs';
+import {withIdentityDiagnostics} from './owner-identity-diagnostic.mjs';
 
 const test=base.extend({
  identityTransport:async({},use)=>{const transport=await identityTransport();try{await use(transport);transport.assertHealthy();}finally{await transport.close();}},
@@ -25,6 +26,7 @@ test.beforeAll(async()=>{
  ({signInIdentity}=await import(pathToFileURL(join(directory,'identity.mjs')).href));
 });
 test.afterAll(async()=>{if(directory)await rm(directory,{recursive:true});});
+const observedSignIn=(page,...args)=>withIdentityDiagnostics(page,observed=>signInIdentity(observed,...args));
 
 async function fixture(page,context,transport,{initialFactor=false,wrongSubject=false,wrongState=false,expired=false,apiOnly=false}={}){
  const origin=robotOrigin,portal=portalOrigin;
@@ -72,7 +74,7 @@ async function fixture(page,context,transport,{initialFactor=false,wrongSubject=
 
 for(const initialFactor of [false,true])test(`owner sign-in uses real browser PKCE navigation and host-only API cookie (initial factor ${initialFactor})`,async({page,context,identityTransport})=>{
  const value=await fixture(page,context,identityTransport,{initialFactor});
- const session=await signInIdentity(page,value.wrapper,value.identity,{code:async()=>'123456'});
+ const session=await observedSignIn(page,value.wrapper,value.identity,{code:async()=>'123456'});
  expect(session.subject).toBe(value.identity.accounts.administrator.subject);expect(session.cookie.value).toBe(value.cookie);
  expect(session.cookie.path).toBe('/api/v1');expect(session.cookie.secure).toBe(true);expect(session.cookie.httpOnly).toBe(true);
  expect(value.submissions).toHaveLength(initialFactor?1:2);
@@ -83,13 +85,13 @@ for(const initialFactor of [false,true])test(`owner sign-in uses real browser PK
 test('API qualification uses real PKCE and Portal forms before the product sign-in UI is deployed',async({page,context,identityTransport})=>{
  const value=await fixture(page,context,identityTransport,{initialFactor:true,apiOnly:true});
  await expect(page.locator('#login-form')).toBeVisible();await expect(page.locator('#onesa-sign-in-button')).toHaveCount(0);
- const session=await signInIdentity(page,value.wrapper,value.identity,{code:async()=>'123456',apiOnly:true});
+ const session=await observedSignIn(page,value.wrapper,value.identity,{code:async()=>'123456',apiOnly:true});
  expect(session.subject).toBe(value.identity.accounts.administrator.subject);expect(value.submissions).toHaveLength(1);
  expect(value.paths.filter(path=>path.endsWith('/api/v1/auth/identity/start'))).toHaveLength(1);
 });
 
 for(const options of [{wrongSubject:true},{wrongState:true},{expired:true}])test(`owner sign-in rejects mismatched live evidence ${Object.keys(options)[0]}`,async({page,context,identityTransport})=>{
  const value=await fixture(page,context,identityTransport,{initialFactor:true,...options});
- await expect(signInIdentity(page,value.wrapper,value.identity,{code:async()=>'123456'})).rejects.toThrow('ROBOT_IDENTITY_FLOW_FAILED');
+ await expect(observedSignIn(page,value.wrapper,value.identity,{code:async()=>'123456'})).rejects.toThrow('ROBOT_IDENTITY_FLOW_FAILED');
  expect(value.submissions).toHaveLength(1);
 });
