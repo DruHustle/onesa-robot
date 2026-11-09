@@ -108,7 +108,10 @@ def protection(plan):
 
     r.require(
         project["id"] == plan["project_id"]
-        and project.get("rootDirectory") == APP_ROOT
+        and project.get("rootDirectory")
+        == r.frontend_root(
+            r.plan_binding(plan, "frontend") if "bindings" in plan else None
+        )
         and project.get("framework") is None
         and project.get("nodeVersion") == "24.x"
         and project.get("serverlessFunctionRegion")
@@ -247,7 +250,8 @@ def unpack(folder, build, destination, plan):
         "PREBUILT_PROJECT_SCOPE",
     )
     r.require(
-        project.get("settings", {}).get("rootDirectory") == APP_ROOT,
+        project.get("settings", {}).get("rootDirectory")
+        == r.frontend_root(receipt["binding"]),
         "PREBUILT_APPLICATION_ROOT_SCOPE",
     )
     r.require(
@@ -257,7 +261,9 @@ def unpack(folder, build, destination, plan):
     )
     # The CLI resolves the provider's monorepo root even for --prebuilt.
     # Only its empty directory is needed; candidate source is never executed.
-    (destination / APP_ROOT).mkdir(mode=0o700, parents=True, exist_ok=False)
+    (destination / r.frontend_root(receipt["binding"])).mkdir(
+        mode=0o700, parents=True, exist_ok=False
+    )
 
 
 def deployments_for(operation, plan):
@@ -287,7 +293,37 @@ def check_deployment(identifier, binding, env, plan):
         and row.get("regions") == [plan["serverless_function_region"]],
         "ACTUAL_FRONTEND_DEPLOYMENT_BINDING",
     )
+    if r.is_canonical(binding):
+        r.require(
+            row.get("meta", {}).get("githubCommitRef") == "main"
+            and all(
+                row.get("meta", {}).get(key) == value
+                for key, value in r.source_metadata(binding).items()
+            ),
+            "CANONICAL_DEPLOYMENT_SOURCE_IDENTITY",
+        )
     return row
+
+
+def verify_retained_frontend(binding, plan, provider_metadata):
+    retained = plan["retained_frontend"]
+    old = retained["binding"]
+    r.require(
+        old["component"] == "frontend"
+        and old["candidate_commit"] == retained["source"]
+        and provider_metadata["deployment_id"] == retained["deployment_id"]
+        and provider_metadata["source"] == old["candidate_commit"],
+        "RETAINED_FRONTEND_SOURCE_OR_PROVIDER_MISMATCH",
+    )
+    chain = r.verify_retained_dependency(binding, retained, plan, "frontend")
+    accepted = next(item for item in chain if item["kind"] == "production-verification")
+    observed = accepted["details"]["observations"]
+    r.require(
+        observed["deployment_id"] == retained["deployment_id"]
+        and observed["frontend"]["source_commit"] == old["candidate_commit"],
+        "RETAINED_FRONTEND_ACCEPTED_DEPLOYMENT_MISMATCH",
+    )
+    return old
 
 
 def observe_provider(binding, env, plan, operation, *, observer=None):
@@ -307,15 +343,7 @@ def observe_provider(binding, env, plan, operation, *, observer=None):
         preview = r.read(Path(plan["preview_receipt_path"]))
         r.require(
             preview["environment"] == "staging"
-            and all(
-                preview["binding"][k] == binding[k]
-                for k in [
-                    "repository",
-                    "candidate_commit",
-                    "source_tree",
-                    "source_sha256",
-                ]
-            ),
+            and r.source_identity(preview["binding"]) == r.source_identity(binding),
             "CURRENT_SOURCE_PREVIEW_REQUIRED",
         )
         identifier = preview["deployment_id"]
@@ -354,6 +382,38 @@ def observe_provider(binding, env, plan, operation, *, observer=None):
         and dep.get("target") == ("production" if env == "production" else None),
         "ACTUAL_PROVIDER_READBACK_MISMATCH",
     )
+    observed_binding = binding
+    if r.is_canonical(binding):
+        if env == "production" and binding["component"] == "api":
+            observed_binding = verify_retained_frontend(
+                binding,
+                plan,
+                {
+                    "deployment_id": identifier,
+                    "source": source,
+                },
+            )
+        elif env == "production" and binding["component"] == "identity-api":
+            # The existing identity bridge requires actual same-Store, same-source
+            # native acceptance, never a retained cross-issuer shortcut.
+            observed_binding = plan["identity"]["native_bridge"]["frontend"]["binding"]
+            r.require(
+                r.source_identity(observed_binding) == r.source_identity(binding),
+                "CANONICAL_IDENTITY_FRONTEND_BRIDGE_SOURCE",
+            )
+        r.validate_source(observed_binding)
+        r.require(
+            observed_binding["candidate_commit"] == source
+            and all(
+                dep.get("meta", {}).get(key) == value
+                for key, value in r.source_metadata(observed_binding).items()
+            )
+            and (
+                not r.is_canonical(observed_binding)
+                or dep.get("meta", {}).get("githubCommitRef") == "main"
+            ),
+            "CANONICAL_PROVIDER_SOURCE_IDENTITY",
+        )
     alias = provider("/v4/aliases/" + origin.removeprefix("https://"))
     r.require(
         alias["deployment"]["id"] == identifier
@@ -382,6 +442,11 @@ def observe_provider(binding, env, plan, operation, *, observer=None):
             "deployment_id": identifier,
             "project_id": cfg["project_id"],
             "source": source,
+            **(
+                {"source_binding": r.source_binding(observed_binding)}
+                if r.is_canonical(observed_binding)
+                else {}
+            ),
             "target": dep.get("target"),
         },
         "provider_token_included": False,
@@ -424,6 +489,7 @@ def create(binding, env, operation, folder, plan):
         transport / "scope.json",
         {
             "repository": binding["repository"],
+            **(r.source_binding(binding) if r.is_canonical(binding) else {}),
             "component": binding["component"],
             "candidate_commit": binding["candidate_commit"],
             "environment": env,
@@ -482,11 +548,17 @@ def create(binding, env, operation, folder, plan):
         "--env",
         "ROBOT_API_URL=" + plan["api_origins"][env],
         "--meta",
-        "githubCommitRef=" + ("main" if env == "production" else "staging"),
+        "githubCommitRef="
+        + ("main" if r.is_canonical(binding) or env == "production" else "staging"),
         "--meta",
         "githubCommitSha=" + binding["candidate_commit"],
         "--meta",
         "onesaOracleOperation=" + operation,
+        *[
+            arg
+            for key, value in sorted(r.source_metadata(binding).items())
+            for arg in ("--meta", key + "=" + value)
+        ],
         *(["--prod"] if env == "production" else ["--target=preview"]),
     ]
     with (op / "cli.stdout").open("xb") as out, (op / "cli.stderr").open("xb") as err:
@@ -578,10 +650,7 @@ def create(binding, env, operation, folder, plan):
 def prepare_preview(api_binding, context, api_plan):
     binding = r.plan_binding(api_plan, "frontend")
     r.require(
-        all(
-            binding[k] == api_binding[k]
-            for k in ["repository", "candidate_commit", "source_tree", "source_sha256"]
-        ),
+        r.source_identity(binding) == r.source_identity(api_binding),
         "PREVIEW_SOURCE_DEPENDENCY",
     )
     folder, plan = validate(binding)
@@ -645,6 +714,7 @@ def independent_api(plan, frontend_binding):
             "runtimes",
         }
         | recovery_reference
+        | ({"verifier_path"} if r.is_canonical(frontend_binding) else set())
         and set(proof["runtimes"]) == {"staging", "production"}
         and re.fullmatch(
             r"/var/lib/onesa/release-verification/robot-owner-[a-f0-9]{40}",
@@ -657,16 +727,16 @@ def independent_api(plan, frontend_binding):
     )
     binding = proof["production_binding"]
     if recovery_reference:
+        r.require(
+            not r.is_canonical(frontend_binding),
+            "CANONICAL_REPAIR_HANDOFF_NOT_COMMISSIONED",
+        )
         import oracle_frontend_repair_dependency as repair
 
         repair.verify(plan, frontend_binding)
     else:
-        records = r.verify_invocation(
-            binding,
-            {"operation_id": proof["operation_id"], "read_only": True},
-            "production",
-            {"verifier_store": proof["verifier_store"]},
-            dependency=True,
+        records = r.verify_retained_dependency(
+            frontend_binding, {**proof, "binding": binding}, plan, "api"
         )
         r.require(
             any(
@@ -675,12 +745,21 @@ def independent_api(plan, frontend_binding):
                 for x in records
             )
             and binding["component"] == "api"
-            and binding["repository"] == "DruHustle/onesa-robot"
+            and (
+                binding["repository"] == "DruHustle/onesa-robot"
+                or r.is_canonical(frontend_binding)
+                and r.is_canonical(binding)
+            )
             and binding["target_environment"] == "production",
             "ORIGINAL_ACCEPTED_API_REQUIRED_NO_RETAINED_PROOF_CHAIN",
         )
     tool = r.trusted_toolchain(plan)
     source = {
+        **(
+            r.source_binding(frontend_binding)
+            if r.is_canonical(frontend_binding)
+            else {}
+        ),
         "repository": frontend_binding["repository"],
         **{
             k: frontend_binding[k]
@@ -698,8 +777,14 @@ def independent_api(plan, frontend_binding):
         ),
         "FRONTEND_DIFFERS_FROM_COMMISSIONED_MAIN",
     )
+    if r.is_canonical(frontend_binding):
+        r.require(
+            tool.get("source_binding") == r.source_binding(frontend_binding),
+            "CANONICAL_FRONTEND_TOOL_SOURCE_MISMATCH",
+        )
     for env in ["staging", "production"]:
         selected = proof[env + "_binding"]
+        r.validate_source(selected)
         r.require(
             selected["repository"] == binding["repository"]
             and selected["component"] == "api"
@@ -754,7 +839,7 @@ def accepted_api(plan):
     try:
         row = db.execute(
             "SELECT d.id FROM deployments d JOIN records x ON x.id=d.id WHERE d.state='accepted' AND x.scope=? ORDER BY x.sequence DESC LIMIT 1",
-            (binding["repository"] + ":" + binding["component"],),
+            (r.component_scope(binding),),
         ).fetchone()
     finally:
         db.close()

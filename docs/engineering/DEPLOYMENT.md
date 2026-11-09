@@ -180,3 +180,52 @@ checks remain mandatory; production never invokes this mutating suite. Missing
 modules produce bounded private failure metadata without disclosing exception text.
 The Oracle adapter selects only the exact staging edge API; existing Render target
 validation remains the default. Owner-run receipts never masquerade as Actions.
+
+## Canonical Robot application source preparation
+
+The explicit schema-2 application consumer selects `DruHustle/onesa-ug`, numeric
+repository ID `1444746154`, product `robot`, source path `onesa-robot`, and current
+owner-merged `main`. It retains the root commit/tree separately from the exact Robot
+subtree. The product-relative source tar must reconstruct that subtree; a root tree
+or repository label cannot substitute for it. Both fixed Robot runtime manifest
+ZIPs are pinned, installed privately, and reread at each existing fresh CI check.
+The source verifier remains `verification_only: true` and
+`release_authorized: false`. Installing those bytes is not commissioning.
+
+Canonical application policy permits exactly the native API/frontend pair, or that
+pair plus the two existing identity components, with one context per component and
+source. It uses distinct `onesa-ug:robot` record scopes, immutable installation and
+candidate artifact/configuration paths, and the fixed
+`/etc/onesa/oracle-robot-canonical-release.json` plan. Existing owner credential
+collectors opt in through `--canonical-source`; the hidden TTY, expiry, exact
+configuration checks, and shared temporary-custody lock remain unchanged. No
+credential or installed host value belongs in source or command examples.
+
+The canonical provider root is `onesa-robot/onesa-ai-robot-frontend`. A credential-free
+build uses the product-relative `onesa-ai-robot-frontend` directory and seals the
+separate canonical provider root into its deployment metadata. Preview and normal
+frontend creation bind the complete source tuple and `main` ref. API staging can
+prepare its source-matched Preview before the new API is accepted, so the paired
+transition is not circular; independent frontend release still requires its own
+accepted API dependency and all existing hosted checks.
+
+An explicit retained native dependency may be read using its original private
+verifier, active trust anchor, key, policy and unrevoked accepted signature chain.
+The old binding is unchanged, SQLite is opened read-only, and signature scratch
+files stay outside the old Store. This neither executes the old controller nor
+renews, transfers or chains release authority. Independent frontend preservation
+still compares the actual backend, edge and ROS archive bytes and each environment's
+images, configuration and running containers. Identity still requires both native
+components accepted for the full same source in the same Store; it cannot borrow
+legacy acceptance or a retained cross-issuer dependency.
+
+The special unresolved-API frontend-repair and recovery observer paths remain
+legacy-only. Their original verifier-pin equality, immutable failed records and
+roll-forward-only journal recovery contract are not relaxed. In particular,
+`automatic_rollback` remains false. This source preparation does not implement a
+cross-installation handoff or exclusive issuer/controller cutover. Actual original
+Store/verifier/key/receipts, accepted versus unresolved runtime state, journal,
+provider root and protection, backup, monitor and operator custody must be inspected
+and compatibly commissioned before live use. The existing physical-hardware and
+processing restrictions remain mandatory; no host migration, identity activation
+or production acceptance is established by these source tests.

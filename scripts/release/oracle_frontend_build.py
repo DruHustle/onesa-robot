@@ -67,7 +67,7 @@ def build(
             "nodeVersion",
         }
         and metadata["settings"]["framework"] is None
-        and metadata["settings"]["rootDirectory"] == "onesa-ai-robot-frontend"
+        and metadata["settings"]["rootDirectory"] == r.frontend_root(binding)
         and metadata["settings"]["nodeVersion"] == "24.x",
         "BUILD_PROJECT_SETTINGS",
     )
@@ -116,7 +116,20 @@ def build(
         project = {
             k: metadata[k] for k in ["projectId", "orgId", "projectName", "settings"]
         }
-        r.write(config / "project.json", project)
+        # The archive is product-relative; the sealed deployment metadata retains
+        # the independently validated canonical provider root.
+        local_project = {
+            **project,
+            "settings": {
+                **project["settings"],
+                "rootDirectory": "onesa-ai-robot-frontend",
+            },
+        }
+        r.write(config / "project.json", local_project)
+        deployment_project = config / "project.json"
+        if r.is_canonical(binding):
+            deployment_project = config / "deployment-project.json"
+            r.write(deployment_project, project)
         shutil.copyfile(chat / "vercel.json", work / "vercel.json")
         with os.fdopen(
             os.open(
@@ -224,7 +237,7 @@ def build(
         artifact = folder / ("frontend-" + environment + "-" + operation + ".tar.gz")
         with tarfile.open(artifact, "w:gz", dereference=False) as target:
             target.add(output, arcname=".vercel/output")
-            target.add(config / "project.json", arcname=".vercel/project.json")
+            target.add(deployment_project, arcname=".vercel/project.json")
             target.add(chat / "vercel.json", arcname="vercel.json")
         artifact.chmod(0o600)
         receipt = {
@@ -243,7 +256,7 @@ def build(
             "artifact_sha256": r.sha(artifact),
             "files": files,
             "deployment_metadata_files": {
-                ".vercel/project.json": r.sha(config / "project.json"),
+                ".vercel/project.json": r.sha(deployment_project),
                 "vercel.json": r.sha(chat / "vercel.json"),
             },
             "links": links,

@@ -65,40 +65,85 @@ def validate(bundle, manifest_pin, github, *, uid=0):
     verifier.private(bundle, directory=True, uid=uid)
     raw = checked_file(bundle / "manifest.json", manifest_pin, uid)
     m = json.loads(raw)
+    consolidated = m.get("schema_version") == 2
     require(
         set(m)
-        == {
-            "schema_version",
-            "repository",
-            "candidate_commit",
-            "source_tree",
-            "files",
-            "policy_sha256",
-            "tool_source_sha256",
-        },
+        == (
+            {
+                "schema_version",
+                "repository",
+                "candidate_commit",
+                "source_tree",
+                "files",
+                "policy_sha256",
+                "tool_source_sha256",
+            }
+            | (verifier.ROBOT_SOURCE_FIELDS if consolidated else set())
+        ),
         "Installation manifest schema",
     )
     require(
-        m["schema_version"] == 1 and m["repository"] == "DruHustle/onesa-robot",
+        consolidated
+        or (m["schema_version"] == 1 and m["repository"] == "DruHustle/onesa-robot"),
         "Installation repository refused",
     )
     require(
         set(m["files"]) == set(ALLOWED),
         "Only reviewed verifier and component runner may be installed",
     )
+    source_binding = verifier.robot_operational_source(m) if consolidated else None
+    policy_bytes = checked_file(bundle / "policy.json", m["policy_sha256"], uid)
+    policy = json.loads(policy_bytes)
+    require(
+        set(policy) == {"schema_version", "components", "toolchain"}
+        and type(policy["schema_version"]) is int
+        and policy["schema_version"] == (2 if consolidated else 1),
+        "Installation policy schema",
+    )
+    archives = None
+    if consolidated:
+        require(
+            policy["toolchain"].get("source_binding") == source_binding,
+            "Canonical installation policy source differs",
+        )
+        archives = verifier.robot_source_archives(
+            bundle / "source-artifacts",
+            verifier.robot_archive_pins(policy["toolchain"]),
+            uid=uid,
+        )
     github.owner()
     # Actual main, owner merge, first-attempt jobs, hygiene and artifacts are fetched
     # by the existing verifier. No supplied PASS receipt is accepted here.
-    ci = github.qualify(
-        {k: m[k] for k in ["repository", "candidate_commit", "source_tree"]}
+    ci = (
+        github.qualify(source_binding, archives)
+        if consolidated
+        else github.qualify(
+            {k: m[k] for k in ["repository", "candidate_commit", "source_tree"]}
+        )
     )
     require(ci, "Current exact-main checks missing")
     source = github.api(
-        "repos/" + m["repository"] + "/git/trees/" + m["source_tree"] + "?recursive=1"
+        "repos/"
+        + m["repository"]
+        + "/git/trees/"
+        + (m["product_source_tree"] if consolidated else m["source_tree"])
+        + "?recursive=1"
     )
     require(not source.get("truncated"), "Source tree incomplete")
+    if consolidated:
+        require(
+            source.get("sha") == m["product_source_tree"],
+            "Canonical installation subtree changed",
+        )
     blobs = {r["path"]: r for r in source["tree"] if r["type"] == "blob"}
-    payloads = {}
+    payloads = (
+        {
+            "source-artifacts/" + name + ".zip": base64.b64decode(data, validate=True)
+            for name, data in archives.items()
+        }
+        if consolidated
+        else {}
+    )
     for local, upstream in ALLOWED.items():
         relative(local)
         checksum = m["files"][local]
@@ -119,23 +164,11 @@ def validate(bundle, manifest_pin, github, *, uid=0):
             "Installation executable differs from current main",
         )
         payloads[local] = data
-    policy_bytes = checked_file(bundle / "policy.json", m["policy_sha256"], uid)
-    policy = json.loads(policy_bytes)
-    require(
-        set(policy) == {"schema_version", "components", "toolchain"}
-        and policy["schema_version"] == 1,
-        "Installation policy schema",
-    )
     require(
         set(policy["components"])
         in [
-            {"DruHustle/onesa-robot:api", "DruHustle/onesa-robot:frontend"},
-            {
-                "DruHustle/onesa-robot:api",
-                "DruHustle/onesa-robot:frontend",
-                "DruHustle/onesa-robot:identity-api",
-                "DruHustle/onesa-robot:identity-frontend",
-            },
+            {verifier.component_scope({**m, "component": name}) for name in names}
+            for names in (verifier.ROBOT_NATIVE_COMPONENTS, verifier.ROBOT_COMPONENTS)
         ],
         "Only the reviewed native pair and explicit identity pair are eligible",
     )
@@ -154,22 +187,25 @@ def validate(bundle, manifest_pin, github, *, uid=0):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     _app, files = module.source_inventory(
-        bundle / "tool-source.tar", {"source_tree": m["source_tree"]}
+        bundle / "tool-source.tar", source_binding or {"source_tree": m["source_tree"]}
     )
     tool = policy["toolchain"]
     require(
         set(tool)
-        == {
-            "source_commit",
-            "source_tree",
-            "source_sha256",
-            "probe_image",
-            "cli_image",
-            "builder_image",
-            "builder_sha256",
-            "transport_guard_sha256",
-            "probe_files",
-        }
+        == (
+            {
+                "source_commit",
+                "source_tree",
+                "source_sha256",
+                "probe_image",
+                "cli_image",
+                "builder_image",
+                "builder_sha256",
+                "transport_guard_sha256",
+                "probe_files",
+            }
+            | ({"source_binding", "source_archives"} if consolidated else set())
+        )
         and tool["source_commit"] == m["candidate_commit"]
         and tool["source_tree"] == m["source_tree"]
         and tool["source_sha256"] == m["tool_source_sha256"],
@@ -189,23 +225,32 @@ def validate(bundle, manifest_pin, github, *, uid=0):
         ),
         "Literal immutable tool image pins required",
     )
-    target = INSTALL_PARENT / ("robot-" + m["source_tree"])
+    target = INSTALL_PARENT / (
+        ("robot-canonical-" if consolidated else "robot-") + m["source_tree"]
+    )
     for component, base in module.COMPONENTS.items():
-        if m["repository"] + ":" + component not in policy["components"]:
+        if (
+            verifier.component_scope({**m, "component": component})
+            not in policy["components"]
+        ):
             continue
         script = "oracle_robot.py" if base == "api" else "oracle_robot_frontend.py"
-        profile = policy["components"][m["repository"] + ":" + component]
+        profile = policy["components"][
+            verifier.component_scope({**m, "component": component})
+        ]
         probe = {
             "repository": m["repository"],
             "component": component,
             "candidate_commit": m["candidate_commit"],
             "source_tree": m["source_tree"],
-            "source_sha256": "0" * 64,
+            "source_sha256": m["tool_source_sha256"] if consolidated else "0" * 64,
             "build_sha256": "0" * 64,
             "artifact_digest": "sha256:" + "0" * 64,
             "configuration_sha256": {"staging": "0" * 64, "production": "0" * 64},
             "target_environment": "production",
         }
+        if consolidated:
+            probe.update(source_binding)
         verifier.binding_valid(probe, policy)
         require(
             profile["qualification_attempt_limit"] == 1,
@@ -262,6 +307,8 @@ def install(bundle, manifest_pin, github, *, dry_run=False, uid=0):
     )  # Atomic no-replace reservation. Interrupted installs are retained.
     try:
         (target / "runners").mkdir(mode=0o700)
+        if manifest["schema_version"] == 2:
+            (target / "source-artifacts").mkdir(mode=0o700)
         for name, data in payloads.items():
             path = target / relative(name)
             with os.fdopen(
@@ -283,6 +330,8 @@ def install(bundle, manifest_pin, github, *, dry_run=False, uid=0):
             "ci": ci,
             "provider_requests": 0,
         }
+        if manifest["schema_version"] == 2:
+            receipt["source_binding"] = verifier.robot_operational_source(manifest)
         with os.fdopen(
             os.open(
                 target / "installation.json",

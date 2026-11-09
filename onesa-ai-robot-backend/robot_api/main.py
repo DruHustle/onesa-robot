@@ -1547,11 +1547,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expected_plan_sha256: str | None = None,
     ):
         sim = state(request, require_watchdog=True)
+        stop_epoch = sim.stop_epoch
         await confirm(sim, request, value)
         # Confirmation yields to the watchdog/logout; recheck authority afterwards.
         sim = state(request, require_watchdog=True)
         operator = await session(request)
-        if sim.stopped or sim.active or sim.humanoid.active or sim.humanoid.pending:
+        if (
+            sim.stop_epoch != stop_epoch
+            or sim.stopped
+            or sim.active
+            or sim.humanoid.active
+            or sim.humanoid.pending
+        ):
             raise HTTPException(409, "Stopped or already running")
         row = sim.db.execute(
             "SELECT * FROM tasks WHERE id=? AND owner=?", (task_id, operator["name"])
@@ -1604,7 +1611,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             sim.cancel("approval_authority_lost", stop=True)
             await sim.flush_journal()
             raise
-        if sim.stopped or sim.active or sim.humanoid.active or sim.humanoid.pending:
+        # Stop followed by an explicit Reset must still invalidate this earlier
+        # approval across both journal and central-identity acknowledgement waits.
+        if (
+            sim.stop_epoch != stop_epoch
+            or sim.stopped
+            or sim.active
+            or sim.humanoid.active
+            or sim.humanoid.pending
+        ):
             sim.cancel("approval_authority_lost", stop=True)
             await sim.flush_journal()
             raise HTTPException(409, "Stopped or already running")
