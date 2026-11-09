@@ -46,8 +46,17 @@ export function baseComponent(binding){
  assert.ok(['api','frontend','identity-api','identity-frontend'].includes(component));
  return component.startsWith('identity-')?component.slice('identity-'.length):component;
 }
+export function validateSourceBinding(binding){
+ assert.ok(binding&&typeof binding==='object');
+ if(binding.repository==='DruHustle/onesa-ug'){
+  assert.equal(binding.schema_version,2);assert.equal(binding.repository_id,1444746154);
+  assert.equal(binding.product,'robot');assert.equal(binding.source_path,'onesa-robot');assert.equal(binding.branch,'main');
+  for(const key of ['candidate_commit','source_tree','product_source_tree'])assert.match(binding[key],/^[a-f0-9]{40}$/);
+ }else assert.equal(binding.repository,'DruHustle/onesa-robot');
+ baseComponent(binding);return binding;
+}
 export async function verifyAnonymousBoundary(page,request){
- assert.equal(request.binding.repository,'DruHustle/onesa-robot');
+ validateSourceBinding(request.binding);
  baseComponent(request.binding);
  assert.ok(['staging','production'].includes(request.environment));
  assert.equal(typeof request.read_only,'boolean');
@@ -61,6 +70,7 @@ export async function verifyAnonymousBoundary(page,request){
  return {path,http_status:401};
 }
 export async function checkUI(request,directory,engines={chromium,firefox,webkit}){
+validateSourceBinding(request.binding);
 let errors=0,replayRequests=0,violations=0;
 const apiOnly=Boolean(request.identity&&request.environment==='production'&&baseComponent(request.binding)==='api'&&request.read_only===true);
 const signInView=apiOnly?'#login-form:visible, #onesa-sign-in:visible':request.identity?'#onesa-sign-in':'#login-form';
@@ -175,7 +185,7 @@ write('browser-receipt.json',receipt);return receipt;
 
 if(process.argv[1] && import.meta.url===new URL('file:'+process.argv[1]).href){
 const request=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
-assert.equal(request.binding.repository,'DruHustle/onesa-robot');
+validateSourceBinding(request.binding);
 assert.equal(typeof request.read_only,'boolean');
 assert.ok(request.environment==='staging'||request.read_only===true);
 assert.match(request.origin,request.environment==='production'?/^https:\/\/robot\.onesa\.eu$/:/^https:\/\/onesa-ai-robot-git-staging-[a-z0-9-]+\.vercel\.app$/);

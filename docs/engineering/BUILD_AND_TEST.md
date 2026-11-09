@@ -1,5 +1,35 @@
 # Independent software builds and tests
 
+## Consolidated-source approval regression
+
+Run product commands from the standalone `DruHustle/onesa-robot` repository root;
+component commands run from their own frontend or backend directories. Restored
+source retains independent build, identity, journal and hardware boundaries.
+
+`tests/test_shared_identity.py` now holds the final real identity validation in both
+joint and inspection approval requests, performs Stop followed by an explicit Reset,
+then releases the delayed response. The prior source incorrectly returned success
+and resumed the cancelled simulation. Approval now retains the existing Stop
+generation across all confirmation, journal and identity waits and rejects a changed
+generation with HTTP 409. The task stays cancelled and the simulator stops; Reset
+cannot authorize an earlier request. The tests use only synthetic local identities
+and exercise actual API routes. This is source regression evidence, not a physical
+controller test or hosted release acceptance.
+
+The 4 November 2026 local source review used Python 3.11.17 and Node 24.22.1.
+The final backend run passed all 338 cases; Ruff, formatting, mypy and generated
+API/client agreement passed. The frontend build, types and 92 unit cases passed.
+The release suite ran 349 cases: 341 passed, seven shared-product cases were explicitly
+inapplicable to Robot and one root-custody case required a root test process. The
+eight repository-script cases and eight appearance/TLS cases also passed, and both
+locked dependency audits reported no known vulnerabilities. An earlier complete
+run timed out while starting the owned restart fixture; the isolated case and final
+complete suite subsequently passed without changing deadlines or source startup.
+Pinned Chromium download returned invalid archives, and the installed alternative
+Chromium could not create a Unix socket in this execution environment. Browser,
+Docker/ROS and hosted release qualification therefore remain required in CI/the
+approved runtime; these local results do not substitute for them.
+
 The optional shared Onesa identity client is covered by
 `tests/test_onesa_identity.py` and `tests/test_shared_identity.py` in the backend,
 plus the frontend's real loopback `tests/identity-gateway.test.mjs`. All test accounts,
@@ -643,3 +673,25 @@ Administrator appearance checks compare every operator-action request while allo
 the existing scheduled legacy heartbeat during accessibility scans. A scan crossing
 the normal poll interval must not mistake routine supervision for a theme-triggered
 permission or motion command.
+
+## Canonical Robot application consumer regressions
+
+`test_oracle_robot_canonical_application.py` reuses the existing canonical GitHub
+protocol fixtures and reconstructs real local Git archives. It distinguishes the
+repository root from the product subtree, requires the literal two/four profile
+sets and fixed runtime ZIPs, and rejects source-only policy as commissioning. A
+real Ed25519 synthetic ledger checks fresh current-main/source-archive rechecks,
+non-renewable contexts and refusal before provider creation after drift. A distinct
+original verifier signs the retained chain; the new reader must preserve every
+old file, refuse changed keys/source/anchor/revocations and mutation phases, and
+cannot supply the identity bridge or special repair/recovery route.
+
+The build fixture checks actual archive and sealed metadata hashes with synthetic
+Docker responses; it is not an executed Docker build. Paired Preview and provider
+checks require the complete source identity. Actual loopback HTTP tests in
+`oracle_vercel_transport_guard.test.cjs` prove wrong or missing canonical deployment
+metadata is refused before a request, and exercise the actual browser source guard
+before its anonymous-denial request. No browser, hosted deployment, simulator,
+physical hardware, private database or installed controller is qualified by those
+fixtures. Run the full release suite and existing transport/documentation checks;
+normal repository CI and real owner-controlled hosted acceptance remain required.
