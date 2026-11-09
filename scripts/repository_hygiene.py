@@ -6,6 +6,7 @@ import io
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -160,9 +161,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--history", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--monorepo-root", type=Path)
     args = parser.parse_args()
-    if Path(git("rev-parse", "--show-toplevel").decode().strip()).resolve() != ROOT:
-        raise SystemExit("Refusing to scan an inherited ancestor repository")
+    repository_root = Path(git("rev-parse", "--show-toplevel").decode().strip()).resolve()
+    if repository_root != ROOT:
+        gate = repository_root / "scripts/repository_hygiene.py"
+        if (
+            args.monorepo_root is None
+            or args.monorepo_root.resolve() != repository_root
+            or ROOT.parent != repository_root
+            or ROOT.name not in {"onesa-company-portal", "onesa-ai-platform", "onesa-robot", "onesa-drone"}
+            or gate.is_symlink()
+            or not gate.is_file()
+        ):
+            raise SystemExit("Refusing to scan an inherited ancestor repository")
+        command = [sys.executable, str(gate), "--product", ROOT.name]
+        command += ["--history"] if args.history else []
+        command += ["--json"] if args.json else []
+        raise SystemExit(subprocess.run(command, cwd=repository_root, check=False).returncode)
+    if args.monorepo_root is not None:
+        raise SystemExit("Monorepo mode requires the explicit consolidated checkout")
     findings = []
 
     def inspect(scope, name, data):

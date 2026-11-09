@@ -166,10 +166,9 @@ class API:
 def validate_request(request):
     b = request["binding"]
     env = request["environment"]
+    r.validate_source(b)
     r.require(
-        b["repository"] == "DruHustle/onesa-robot"
-        and b["component"] in r.COMPONENTS
-        and env in ["staging", "production"],
+        b["component"] in r.COMPONENTS and env in ["staging", "production"],
         "HOSTED_PROBE_COMPONENT_SCOPE",
     )
     r.require(
@@ -213,6 +212,19 @@ def validate_request(request):
         and provider["provider"]["source"] == request["expected_frontend_source"],
         "ACTUAL_HOSTED_PROVIDER_REQUIRED",
     )
+    if r.is_canonical(b):
+        observed = provider["provider"].get("source_binding")
+        if observed is not None:
+            r.source_binding(observed)
+            r.require(
+                observed["candidate_commit"] == request["expected_frontend_source"],
+                "CANONICAL_PROBE_FRONTEND_SOURCE",
+            )
+        r.require(
+            (env == "production" and r.base_component(b) == "api")
+            or observed == r.source_binding(b),
+            "CANONICAL_PROBE_SOURCE_REQUIRED",
+        )
     r.require(
         re.fullmatch("sha256:[a-f0-9]{64}", request["probe_image"])
         and request["cpu_limit"] in ["1", "2"],

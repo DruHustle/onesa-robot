@@ -339,3 +339,19 @@ promised; owner-configured alert delivery remains a production prerequisite.
 - [Dependabot options and version-only cooldown](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference)
 - [Copilot Code Review availability](https://docs.github.com/en/copilot/concepts/agents/code-review)
 - [Semgrep metrics and local rule usage](https://docs.semgrep.dev/metrics)
+
+## Canonical Robot application source contract
+
+The product-local schema-2 consumer reuses the existing `onesa-ug` exact-main source
+verifier and both fixed Robot runtime manifests. Numeric repository identity, root
+and product trees, archive bytes, normal owner promotion and every required hosted
+CI gate remain distinct from release authority. Application policy explicitly opts
+in only the native pair or the native-plus-identity four-component set; old signed
+record scopes and immutable installations remain valid only under their original
+verifier and trust pins. No root workflow or shared deployment credential is added.
+
+Source preparation supplies neither cross-installation exclusive control nor an
+automatic legacy handoff. Canonical recovery/repair shortcuts are refused. Physical
+actuation, processing limits, same-Store identity prerequisites and roll-forward-only
+recovery remain unchanged. A reviewed source candidate and synthetic tests must not
+be recorded as host commissioning, runtime deployment or production acceptance.

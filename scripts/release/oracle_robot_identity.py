@@ -51,6 +51,10 @@ def profile(plan, binding, tool):
         selected = plan["bindings"][component]
         r.require(
             selected["component"] == component
+            and (
+                not r.is_canonical(binding)
+                or r.source_identity(selected) == r.source_identity(binding)
+            )
             and all(
                 selected[key] == binding[key]
                 for key in [
@@ -174,6 +178,10 @@ def native_bridge(plan, binding):
         native = reference["binding"]
         r.require(
             native["component"] == component
+            and (
+                not r.is_canonical(binding)
+                or r.source_identity(native) == r.source_identity(binding)
+            )
             and all(
                 native[key] == binding[key]
                 for key in [
@@ -607,6 +615,11 @@ def collect(plan, binding, prompt=getpass.getpass):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", required=True)
+    parser.add_argument(
+        "--canonical-source",
+        action="store_true",
+        help="Use the fixed separately reviewed canonical Robot plan",
+    )
     parser.add_argument("--clear-expired", action="store_true")
     args = parser.parse_args()
     r.require(
@@ -640,7 +653,11 @@ def main():
         )
         return
     r.require(sys.stdin.isatty(), "OWNER_HIDDEN_TTY_REQUIRED_NO_SECRET_STDIN")
-    plan = r.read(r.PLAN)
+    plan = r.read(
+        r.PLAN.with_name("oracle-robot-canonical-release.json")
+        if args.canonical_source
+        else r.PLAN
+    )
     binding = plan["bindings"][
         plan.get(
             "release_component",
