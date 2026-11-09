@@ -458,6 +458,64 @@ def test_request_rechecks_local_revocation_after_identity_network_wait(environme
     assert client.portal.call(lambda: app.state.sim.stopped)
 
 
+@pytest.mark.parametrize("kind", ["joint", "inspection"])
+def test_stop_then_reset_cannot_resume_an_approval_waiting_on_identity(
+    environment, monkeypatch, kind
+):
+    app, client, issuer, _ = environment
+    sign_in(client, issuer, person())
+    assert client.post("/api/v1/reset", json={"confirmed": True}).status_code == 200
+    if kind == "joint":
+        created = client.post("/api/v1/tasks", json=proposal()).json()
+        path = f"/api/v1/tasks/{created['id']}/approve"
+        approval = {"confirmed": True}
+    else:
+        created = client.post(
+            "/api/v1/missions",
+            json={
+                "command_id": str(uuid4()),
+                "robot_profile_id": "sim-inspector",
+                "scenario": "normal",
+                "seed": 101,
+            },
+        ).json()
+        path = f"/api/v1/missions/{created['id']}/approve"
+        approval = {"confirmed": True, "expected_plan_sha256": created["record"]["plan_sha256"]}
+    entered, release = threading.Event(), threading.Event()
+    calls = 0
+
+    def waiting(config, token):
+        nonlocal calls
+        calls += 1
+        # The fourth live validation follows the durable running acknowledgement,
+        # immediately before execution starts. Other requests remain independent.
+        if calls == 4:
+            entered.set()
+            assert release.wait(5)
+        return issuer.validate(config, token)
+
+    monkeypatch.setattr(identity, "validate_session", waiting)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        response = pool.submit(client.post, path, json=approval)
+        try:
+            assert entered.wait(5)
+            assert client.post("/api/v1/stop").status_code == 200
+            # Reset is an explicit new action, never permission for the previous
+            # pending approval to resume after its identity response arrives.
+            assert client.post("/api/v1/reset", json={"confirmed": True}).status_code == 200
+        finally:
+            release.set()
+        assert response.result(timeout=5).status_code == 409
+    assert app.state.sim.active is None
+    assert client.portal.call(lambda: app.state.sim.stopped)
+    stored = client.portal.call(
+        lambda: app.state.sim.db.execute(
+            "SELECT state FROM tasks WHERE id=?", (created["id"],)
+        ).fetchone()[0]
+    )
+    assert stored == "cancelled"
+
+
 def test_logout_clears_local_authority_and_requests_global_signout(environment):
     app, client, issuer, _ = environment
     sign_in(client, issuer, person())

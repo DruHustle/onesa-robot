@@ -71,6 +71,156 @@ def base_component(binding):
     return COMPONENTS[component]
 
 
+SOURCE_FIELDS = {
+    "schema_version",
+    "repository",
+    "repository_id",
+    "product",
+    "source_path",
+    "candidate_commit",
+    "source_tree",
+    "product_source_tree",
+    "branch",
+}
+CANONICAL_REPOSITORY = "DruHustle/onesa-ug"
+LEGACY_REPOSITORY = "DruHustle/onesa-robot"
+
+
+def is_canonical(binding):
+    return (
+        isinstance(binding, dict) and binding.get("repository") == CANONICAL_REPOSITORY
+    )
+
+
+def source_binding(binding):
+    """Source identity only; this does not commission or authorize a release."""
+    require(
+        isinstance(binding, dict) and SOURCE_FIELDS <= set(binding),
+        "COMPLETE_CANONICAL_ROBOT_SOURCE_REQUIRED",
+    )
+    source = {key: binding[key] for key in SOURCE_FIELDS}
+    require(
+        type(source["schema_version"]) is int
+        and source["schema_version"] == 2
+        and source["repository"] == CANONICAL_REPOSITORY
+        and type(source["repository_id"]) is int
+        and source["repository_id"] == 1444746154
+        and source["product"] == "robot"
+        and source["source_path"] == "onesa-robot"
+        and source["branch"] == "main"
+        and all(
+            isinstance(source[key], str) and re.fullmatch(r"[a-f0-9]{40}", source[key])
+            for key in ("candidate_commit", "source_tree", "product_source_tree")
+        ),
+        "CANONICAL_ROBOT_APPLICATION_SOURCE_SCOPE",
+    )
+    return source
+
+
+def validate_source(binding):
+    require(isinstance(binding, dict), "ROBOT_SOURCE_REQUIRED")
+    if is_canonical(binding):
+        source_binding(binding)
+    else:
+        require(
+            binding.get("repository") == LEGACY_REPOSITORY, "ROBOT_REPOSITORY_SCOPE"
+        )
+    base_component(binding)
+    return binding
+
+
+def source_identity(binding):
+    fields = {"repository", "candidate_commit", "source_tree", "source_sha256"}
+    if is_canonical(binding):
+        source_binding(binding)
+        fields |= SOURCE_FIELDS
+    return {key: binding[key] for key in fields}
+
+
+def component_scope(binding):
+    validate_source(binding)
+    return (
+        CANONICAL_REPOSITORY + ":robot:"
+        if is_canonical(binding)
+        else LEGACY_REPOSITORY + ":"
+    ) + binding["component"]
+
+
+def source_metadata(binding):
+    if not is_canonical(binding):
+        return {}
+    source = source_binding(binding)
+    return {
+        "onesaSource" + suffix: str(source[key])
+        for suffix, key in [
+            ("Schema", "schema_version"),
+            ("Repository", "repository"),
+            ("RepositoryId", "repository_id"),
+            ("Product", "product"),
+            ("Path", "source_path"),
+            ("RootTree", "source_tree"),
+            ("ProductTree", "product_source_tree"),
+            ("Branch", "branch"),
+        ]
+    }
+
+
+def frontend_root(binding):
+    if is_canonical(binding):
+        source_binding(binding)
+        return "onesa-robot/onesa-ai-robot-frontend"
+    return "onesa-ai-robot-frontend"
+
+
+def plan_path(binding):
+    return (
+        PLAN.with_name("oracle-robot-canonical-release.json")
+        if is_canonical(binding)
+        else PLAN
+    )
+
+
+def verify_retained_dependency(consumer_binding, retained, plan, component):
+    """Read the original accepted chain without invoking or renewing its issuer."""
+    validate_source(consumer_binding)
+    require(
+        consumer_binding["component"] in {"api", "frontend"},
+        "RETAINED_DEPENDENCY_CANNOT_SUPPLY_IDENTITY_BRIDGE",
+    )
+    binding = retained["binding"]
+    validate_source(binding)
+    require(
+        component in {"api", "frontend"}
+        and binding["component"] == component
+        and binding["target_environment"] == "production",
+        "RETAINED_ROBOT_NATIVE_DEPENDENCY_REQUIRED",
+    )
+    original = retained.get("verifier_path")
+    if is_canonical(consumer_binding):
+        require(
+            consumer_binding.get("target_environment") == "production",
+            "CANONICAL_DEPENDENCY_CONSUMER_TARGET",
+        )
+        require(isinstance(original, str), "ORIGINAL_RETAINED_VERIFIER_REQUIRED")
+    else:
+        require(
+            original is None and binding["repository"] == LEGACY_REPOSITORY,
+            "LEGACY_INVOCATION_PIN_UNCHANGED",
+        )
+    return verify_invocation(
+        binding,
+        {"operation_id": retained["operation_id"], "read_only": True},
+        "production",
+        {"verifier_store": retained.get("verifier_store", plan["verifier_store"])},
+        dependency=True,
+        **(
+            {"retained_verifier": original, "consumer_binding": consumer_binding}
+            if original is not None
+            else {}
+        ),
+    )
+
+
 def plan_binding(plan, component):
     require(component in {"api", "frontend"}, "ROBOT_DEPENDENCY_COMPONENT_SCOPE")
     key = ("identity-" if plan.get("identity") is not None else "") + component
@@ -391,12 +541,43 @@ def image_security(scan, identity, architecture="arm64"):
 
 
 def verify_invocation(
-    binding, context, phase, plan, *, dependency=False, repair_dependency=None
+    binding,
+    context,
+    phase,
+    plan,
+    *,
+    dependency=False,
+    repair_dependency=None,
+    retained_verifier=None,
+    consumer_binding=None,
 ):
+    verifier = VERIFIER
+    if retained_verifier is not None or consumer_binding is not None:
+        require(
+            dependency
+            and phase == "production"
+            and repair_dependency is None
+            and is_canonical(consumer_binding)
+            and context.get("read_only") is True
+            and consumer_binding.get("component") in {"api", "frontend"}
+            and consumer_binding.get("target_environment") == "production"
+            and binding.get("component") in {"api", "frontend"}
+            and binding.get("target_environment") == "production"
+            and isinstance(retained_verifier, str),
+            "RETAINED_VERIFIER_READ_ONLY_DEPENDENCY_REQUIRED",
+        )
+        validate_source(consumer_binding)
+        validate_source(binding)
+        verifier = private(Path(retained_verifier))
+        require(
+            0 < verifier.stat().st_size <= 2 * 1024 * 1024,
+            "RETAINED_VERIFIER_BYTE_BOUND",
+        )
     require(
         repair_dependency is None
         or phase == "production"
         and binding["component"] == "api"
+        and not is_canonical(binding)
         and not dependency
         and str(UUID(repair_dependency)) == repair_dependency,
         "EXACT_READONLY_REPAIR_DEPENDENCY_SCOPE_REQUIRED",
@@ -444,7 +625,7 @@ def verify_invocation(
     require(
         sha(store / "public.pem") == trust["key_id"]
         and sha(store / "policy.json") == trust["policy_sha256"]
-        and sha(VERIFIER) == trust["verifier_sha256"],
+        and sha(verifier) == trust["verifier_sha256"],
         "ISSUER_CUSTODY_PIN_CHANGED",
     )
     require(sha(OPENSSL) == trust["openssl_sha256"], "SIGNATURE_TOOL_CHANGED")
@@ -477,7 +658,8 @@ def verify_invocation(
             "FOREIGN_RECORD_SIGNER",
         )
         with tempfile.TemporaryDirectory(
-            prefix=".runner-signature-", dir=store
+            prefix=".runner-signature-",
+            dir=None if retained_verifier is not None else store,
         ) as folder:
             p = Path(folder)
             (p / "record").write_bytes(canonical(r))
@@ -693,7 +875,12 @@ def source_inventory(archive_path, binding):
         ).digest()
 
     require(
-        git_tree(tree).hex() == binding["source_tree"],
+        git_tree(tree).hex()
+        == (
+            source_binding(binding)["product_source_tree"]
+            if is_canonical(binding)
+            else binding["source_tree"]
+        ),
         "ARCHIVE_DIFFERS_FROM_QUALIFIED_GIT_TREE",
     )
     require(
@@ -750,9 +937,9 @@ CHECKS = {
 
 
 def verify_toolchain(plan, binding, *, observer=None):
+    validate_source(binding)
     require(
-        binding["repository"] == "DruHustle/onesa-robot"
-        and binding["component"] in COMPONENTS
+        binding["component"] in COMPONENTS
         and binding["target_environment"] == "production",
         "ROBOT_COMPONENT_SCOPE",
     )
@@ -775,9 +962,47 @@ def verify_toolchain(plan, binding, *, observer=None):
         "COMMISSIONED_TOOLCHAIN_CHANGED",
     )
     policy = read(store / "policy.json")
-    profile = policy["components"].get(
-        binding["repository"] + ":" + binding["component"]
-    )
+    if is_canonical(binding):
+        source = source_binding(binding)
+        tool = policy.get("toolchain", {})
+        names = set(policy.get("components", {}))
+        require(
+            policy.get("schema_version") == 2
+            and tool.get("source_binding") == source
+            and tool.get("source_commit") == binding["candidate_commit"]
+            and tool.get("source_tree") == binding["source_tree"]
+            and tool.get("source_sha256") == binding["source_sha256"]
+            and names
+            in [
+                {CANONICAL_REPOSITORY + ":robot:" + name for name in selected}
+                for selected in ({"api", "frontend"}, set(COMPONENTS))
+            ]
+            and all(
+                type(item.get("qualification_attempt_limit")) is int
+                and item["qualification_attempt_limit"] == 1
+                for item in policy["components"].values()
+            ),
+            "CANONICAL_ROBOT_COMMISSIONED_SOURCE_REQUIRED",
+        )
+        pins = tool.get("source_archives", {})
+        require(
+            set(pins)
+            == {
+                "robot-runtime-onesa-ai-robot-backend",
+                "robot-runtime-onesa-ai-robot-frontend",
+            },
+            "CANONICAL_ROBOT_SOURCE_ARCHIVE_SET",
+        )
+        for name, pin in pins.items():
+            archive = private(VERIFIER.parent / "source-artifacts" / (name + ".zip"))
+            require(
+                isinstance(pin, str)
+                and re.fullmatch(r"[a-f0-9]{64}", pin)
+                and 0 < archive.stat().st_size <= 24 * 1024
+                and sha(archive) == pin,
+                "CANONICAL_ROBOT_SOURCE_ARCHIVE_CHANGED",
+            )
+    profile = policy["components"].get(component_scope(binding))
     require(
         profile and profile["qualification_attempt_limit"] == 1,
         "COMPONENT_NOT_COMMISSIONED_WITH_ONE_CONTEXT",
@@ -790,6 +1015,9 @@ def verify_toolchain(plan, binding, *, observer=None):
         "MANDATORY_CHECKS_REMOVED",
     )
     if observer is not None:
+        require(
+            not is_canonical(binding), "CANONICAL_RECOVERY_HANDOFF_NOT_COMMISSIONED"
+        )
         # The original issuer/source chain remains pinned above. A separately
         # commissioned, read-only observer supplies its own reviewed tool policy.
         policy = observer.current_policy()
@@ -808,6 +1036,11 @@ def verify_toolchain(plan, binding, *, observer=None):
         and installation["source"] == policy["toolchain"]["source_commit"],
         "INSTALLED_SOURCE_IDENTITY",
     )
+    if is_canonical(binding):
+        require(
+            installation.get("source_binding") == source_binding(binding),
+            "CANONICAL_INSTALLED_SOURCE_IDENTITY",
+        )
     for name, pin in installation["files"].items():
         p = private(VERIFIER.parent / name)
         require(sha(p) == pin, "INSTALLED_EXECUTABLE_CHANGED")
@@ -841,7 +1074,10 @@ def component_folder(binding):
         "COMPONENT_ARTIFACT_SCOPE",
     )
     return private(
-        ROOT / binding["component"] / "artifacts" / binding["candidate_commit"],
+        (ROOT / "canonical-robot" if is_canonical(binding) else ROOT)
+        / binding["component"]
+        / "artifacts"
+        / binding["candidate_commit"],
         directory=True,
     )
 
@@ -852,7 +1088,11 @@ def candidate_environment(binding, env):
         "CANDIDATE_ENVIRONMENT_SCOPE",
     )
     base_component(binding)
-    root = Path("/etc/onesa/backends/candidates") / binding["candidate_commit"]
+    root = Path("/etc/onesa/backends/candidates")
+    if is_canonical(binding):
+        source_binding(binding)
+        root /= "canonical-robot"
+    root /= binding["candidate_commit"]
     if binding["component"] in IDENTITY_COMPONENTS:
         # The paired frontend consumes its independently accepted identity API
         # configuration. Native bridge bytes remain in their original location.
@@ -944,23 +1184,33 @@ def frontend_configuration(binding, env):
         "FRONTEND_CONFIGURATION_SCOPE",
     )
     base_component(binding)
-    root = Path("/etc/onesa/backends/candidates") / binding["candidate_commit"]
+    root = Path("/etc/onesa/backends/candidates")
+    if is_canonical(binding):
+        source_binding(binding)
+        root /= "canonical-robot"
+    root /= binding["candidate_commit"]
     if binding["component"] in IDENTITY_COMPONENTS:
         root /= "identity-frontend"
     return root / ("robot-frontend-" + env + ".json")
 
 
 def frontend_configuration_value(plan, env):
+    binding = (
+        plan_binding(plan, "frontend")
+        if "bindings" in plan
+        else {"repository": LEGACY_REPOSITORY}
+    )
     return {
         "schema_version": 1,
-        "repository": "DruHustle/onesa-robot",
+        "repository": binding["repository"],
+        **(source_binding(binding) if is_canonical(binding) else {}),
         "component": "identity-frontend"
         if plan.get("identity") is not None
         else "frontend",
         "environment": env,
         "project_id": plan["project_id"],
         "team_id": plan["team_id"],
-        "application_root": "onesa-ai-robot-frontend",
+        "application_root": frontend_root(binding),
         "origin": plan["origins"][env],
         "api_origin": plan["api_origins"][env],
         "protection_sha256": plan["vercel_protection_sha256"],
@@ -972,7 +1222,11 @@ def frontend_configuration_value(plan, env):
 def validate_plan(binding, *, observer=None):
     import oracle_robot_identity as identity
 
-    plan = read(PLAN) if observer is None else observer.original_plan()
+    require(
+        observer is None or not is_canonical(binding),
+        "CANONICAL_RECOVERY_HANDOFF_NOT_COMMISSIONED",
+    )
+    plan = read(plan_path(binding)) if observer is None else observer.original_plan()
     require(
         plan["schema_version"] == 1
         and plan["bindings"].get(binding["component"]) == binding
@@ -991,6 +1245,21 @@ def validate_plan(binding, *, observer=None):
     tool = verify_toolchain(
         plan, binding, **({"observer": observer} if observer is not None else {})
     )
+    if is_canonical(binding) and "independent_api" not in plan:
+        expected = (
+            IDENTITY_COMPONENTS
+            if binding["component"] in IDENTITY_COMPONENTS
+            else {"api", "frontend"}
+        )
+        require(
+            set(plan["bindings"]) == expected
+            and all(
+                value["component"] == name
+                and source_identity(value) == source_identity(binding)
+                for name, value in plan["bindings"].items()
+            ),
+            "CANONICAL_PAIRED_COMPONENT_SOURCE_REQUIRED",
+        )
     identity_profile = identity.profile(plan, binding, tool)
     require(
         observer is None or identity_profile is None,
@@ -1301,6 +1570,10 @@ def validate_frontend_builds(folder, binding, plan):
             and receipt["binding"]["candidate_commit"] == binding["candidate_commit"]
             and receipt["binding"]["source_tree"] == binding["source_tree"]
             and receipt["binding"]["source_sha256"] == binding["source_sha256"]
+            and (
+                not is_canonical(binding)
+                or source_identity(receipt["binding"]) == source_identity(binding)
+            )
             and receipt["environment"] == env
             and receipt["source_tree_verified"] is True
             and receipt["provider_credentials_mounted"] is False

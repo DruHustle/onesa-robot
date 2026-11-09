@@ -157,6 +157,11 @@ def _collect(plan, candidate, prompt):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", required=True)
+    parser.add_argument(
+        "--canonical-source",
+        action="store_true",
+        help="Use the fixed separately reviewed canonical Robot plan",
+    )
     parser.add_argument("--inspect", action="store_true")
     parser.add_argument("--clear-expired", action="store_true")
     args = parser.parse_args()
@@ -191,7 +196,18 @@ def main():
         )
         return
     r.require(sys.stdin.isatty(), "OWNER_HIDDEN_TTY_REQUIRED_NO_STDIN_SECRET_FALLBACK")
-    print(json.dumps(collect(r.read(r.PLAN), args.candidate)))
+    print(
+        json.dumps(
+            collect(
+                r.read(
+                    r.PLAN.with_name("oracle-robot-canonical-release.json")
+                    if args.canonical_source
+                    else r.PLAN
+                ),
+                args.candidate,
+            )
+        )
+    )
 
 
 if __name__ == "__main__":
