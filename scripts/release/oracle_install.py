@@ -26,6 +26,7 @@ ALLOWED = {
     "runners/oracle_frontend_repair_dependency.py": "scripts/release/oracle_frontend_repair_dependency.py",
     "runners/oracle_robot_recovery.py": "scripts/release/oracle_robot_recovery.py",
     "runners/oracle_robot_journal_diagnostic.py": "scripts/release/oracle_robot_journal_diagnostic.py",
+    "runners/oracle_robot_idle_recovery.py": "scripts/release/oracle_robot_idle_recovery.py",
     "runners/oracle_robot_identity.py": "scripts/release/oracle_robot_identity.py",
     "runners/oracle_operator_custody.py": "scripts/release/oracle_operator_custody.py",
     "runners/oracle_robot_probe.py": "scripts/release/oracle_robot_probe.py",
