@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from robot_api import humanoid, inspection
 from robot_api import onesa_identity as identity
 from robot_api.edge import EdgeMonitor, Telemetry
+from robot_api.owner_recovery import (
+    OwnerRecovery,
+    OwnerRecoveryConfiguration,
+    OwnerRecoveryServer,
+)
 from robot_api.safety import Proposal, SafetyGate, SafetyViolation
 from robot_api.security import PasswordVerifier, VerificationBusy, token_hash
 from robot_api.turso import (
@@ -311,6 +317,7 @@ class State:
         self.journal_version = 0
         self.journal_lock = asyncio.Lock()
         self.journal_failed = False
+        self.journal_failure_metadata: dict[str, Any] | None = None
         self.journal_recovery_allowed = False
         self.journal_recovery_attempts = 0
         self.journal_recovery_next_at = 0.0
@@ -435,6 +442,14 @@ class State:
                 if isinstance(error, JournalFailure)
                 else JournalFailure(category, phase, elapsed_ms)
             )
+            self.journal_failure_metadata = {
+                "category": diagnostic.category,
+                "phase": diagnostic.phase,
+                "elapsed_ms": diagnostic.elapsed_ms,
+                "http_status": diagnostic.http_status,
+                "transport_kind": diagnostic.transport_kind,
+                "reconciliation": diagnostic.reconciliation,
+            }
             # Only a known idle renewal transport failure permits a new lease
             # attempt. Never reset this budget on repeated readiness/flush errors.
             self.journal_recovery_allowed = (
@@ -455,7 +470,9 @@ class State:
                 diagnostic.reconciliation,
             )
 
-    async def recover_idle_journal(self) -> bool:
+    async def recover_idle_journal(
+        self, *, owner_guard: Callable[[bool], bool] | None = None
+    ) -> bool:
         """Acquire new ownership after idle failure; never repair or replay tasks."""
         if (
             not self.journal
@@ -484,6 +501,8 @@ class State:
                 is not None
             ):
                 self.journal_recovery_allowed = False
+                return False
+            if owner_guard is not None and not owner_guard(False):
                 return False
             previous = self.journal
             local_rows = self.db.execute(f"SELECT {','.join(COLUMNS)} FROM tasks").fetchall()
@@ -524,6 +543,9 @@ class State:
                         ).fetchone()
                         is not None
                     ):
+                        self.journal_recovery_allowed = False
+                        return False
+                    if owner_guard is not None and not owner_guard(True):
                         self.journal_recovery_allowed = False
                         return False
                     self.db.execute("DELETE FROM sessions")
@@ -789,7 +811,11 @@ class State:
 Session = dict[str, Any]
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    owner_recovery: OwnerRecoveryConfiguration | None = None,
+) -> FastAPI:
     config = settings or Settings()
     identity_config = config.identity_configuration() if config.identity_enabled else None
 
@@ -862,26 +888,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         journal_task = asyncio.create_task(journal_watch()) if state.journal else None
         task = asyncio.create_task(watch())
         app.state.watch = task
+        recovery_server = None
         try:
+            # No environment variable, HTTP request or default configuration can
+            # enable this owner-local channel. A future qualified factory must
+            # explicitly supply its immutable installation/runtime binding.
+            if owner_recovery is not None:
+                recovery_server = OwnerRecoveryServer(
+                    OwnerRecovery(state, owner_recovery, lambda: not task.done())
+                )
+                await recovery_server.start()
             yield
         finally:
             try:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+                if recovery_server:
+                    await recovery_server.close()
             finally:
                 try:
-                    if journal_task:
-                        journal_task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await journal_task
-                    state.cancel("process_shutdown", stop=True)
-                    with contextlib.suppress(sqlite3.Error):
-                        await state.flush_journal()
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
                 finally:
-                    state.db.close()
-                    if state.journal:
-                        await state.journal.close()
+                    try:
+                        if journal_task:
+                            journal_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await journal_task
+                        state.cancel("process_shutdown", stop=True)
+                        with contextlib.suppress(sqlite3.Error):
+                            await state.flush_journal()
+                    finally:
+                        state.db.close()
+                        if state.journal:
+                            await state.journal.close()
 
     app = FastAPI(
         title="Onesa Robot Simulation API",
