@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -293,6 +293,18 @@ class TaskResponse(BaseModel):
 class ActionResponse(BaseModel):
     status: str
     physical_actuation: Literal[False] = False
+
+
+class ServiceError(BaseModel):
+    detail: str
+
+
+ACTUATOR_UNAVAILABLE: dict[int | str, dict[str, Any]] = {
+    503: {
+        "description": "Simulation service unavailable, including an actuator feedback fault.",
+        "model": ServiceError,
+    }
+}
 
 
 class LogoutResponse(ActionResponse):
@@ -735,10 +747,12 @@ class State:
                 self.cancel("operator_connection_lost", stop=True)
             elif whole.pending and time.time() - whole.pending[1].request.issued_at > 15:
                 whole.stop("proposal_expired")
+                if whole.faulted:
+                    self.cancel("actuator_failure", stop=True)
             else:
                 try:
                     whole.tick(time.monotonic())
-                except ValueError:
+                except humanoid.ActuatorFault:
                     self.cancel("actuator_failure", stop=True)
         if self.physical_permission_owner is not None:
             permitted = self.db.execute(
@@ -891,6 +905,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+
+    @app.exception_handler(humanoid.ActuatorFault)
+    async def actuator_fault(request: Request, error: humanoid.ActuatorFault):
+        sim = request.app.state.sim
+        if not sim.stopped or sim.physical_permission_owner:
+            sim.cancel("actuator_failure", stop=True)
+        return JSONResponse({"detail": str(error)}, status_code=503)
 
     @app.middleware("http")
     async def boundary(request: Request, call_next):
@@ -1132,7 +1153,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def physical_permission(request: Request, administrator: Administrator):
         return state(request).physical_permission()
 
-    @app.post("/api/v1/admin/physical-operation/allow", response_model=PhysicalPermissionResponse)
+    @app.post(
+        "/api/v1/admin/physical-operation/allow",
+        response_model=PhysicalPermissionResponse,
+        responses=ACTUATOR_UNAVAILABLE,
+    )
     async def allow_physical_permission(
         value: PhysicalPermissionConfirmation, request: Request, administrator: Administrator
     ):
@@ -1162,6 +1187,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(
                 409, "Confirm an already-stopped, idle simulator before allowing operation"
             )
+        sim.humanoid.verified_positions()
         sim.physical_permission_owner = administrator["token"]
         sim.physical_permission_expires = float(current[0])
         sim.physical_permission_revision += 1
@@ -1860,7 +1886,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Content-Disposition": 'attachment; filename="onesa-humanoid-reference.urdf"'},
         )
 
-    @app.get("/api/v1/humanoid/state", response_model=humanoid.Observation)
+    @app.get(
+        "/api/v1/humanoid/state",
+        response_model=humanoid.Observation,
+        responses=ACTUATOR_UNAVAILABLE,
+    )
     async def humanoid_state(request: Request, operator: Operator):
         sim = state(request)
         observed = sim.humanoid.observe(operator["token"], time.time(), sim.stopped)
@@ -1894,6 +1924,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def humanoid_ready(request: Request) -> State:
         sim = state(request, require_watchdog=True)
+        sim.humanoid.require_healthy()
         if sim.journal_failed:
             raise HTTPException(503, "Remote simulation journal requires recovery")
         if (
@@ -1906,7 +1937,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(409, "Reset Stop and complete or cancel legacy tasks first")
         return sim
 
-    @app.post("/api/v1/humanoid/proposals", status_code=201, response_model=humanoid.MotionPlan)
+    @app.post(
+        "/api/v1/humanoid/proposals",
+        status_code=201,
+        response_model=humanoid.MotionPlan,
+        responses=ACTUATOR_UNAVAILABLE,
+    )
     async def humanoid_propose(value: humanoid.MotionRequest, request: Request, operator: Operator):
         sim = humanoid_ready(request)
         try:
@@ -1918,7 +1954,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
 
-    @app.post("/api/v1/humanoid/proposals/{command_id}/approve", response_model=humanoid.MotionPlan)
+    @app.post(
+        "/api/v1/humanoid/proposals/{command_id}/approve",
+        response_model=humanoid.MotionPlan,
+        responses=ACTUATOR_UNAVAILABLE,
+    )
     async def humanoid_approve(
         command_id: UUID, value: MissionConfirmation, request: Request, operator: Operator
     ):
@@ -1966,7 +2006,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         state(request).cancel("operator_stop", stop=True)
         return {"status": "stopped"}
 
-    @app.post("/api/v1/reset", response_model=ActionResponse)
+    @app.post("/api/v1/reset", response_model=ActionResponse, responses=ACTUATOR_UNAVAILABLE)
     async def reset(value: Confirmation, request: Request, operator: Operator):
         sim = state(request, require_watchdog=True)
         stop_epoch = sim.stop_epoch
@@ -1979,6 +2019,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(409, "Stop changed during reset confirmation")
         if sim.active or sim.humanoid.active or sim.humanoid.pending:
             raise HTTPException(409, "Cancel the current task first")
+        sim.humanoid.verified_positions()
         sim.db.execute("UPDATE safety SET stopped=0 WHERE id=1")
         sim.db.commit()
         return {"status": "reset", "physical_actuation": False}

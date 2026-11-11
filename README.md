@@ -48,6 +48,12 @@ physical driver or balance/contact model is present. See the
 [simulation architecture](docs/engineering/SIMULATION_ARCHITECTURE.md#full-body-humanoid-reference--source-development)
 for the development scope and authority boundary. Hosted acceptance is separate.
 
+For physical commissioning, the source includes a [bench feedback check](ros2/README.md).
+An engineer can observe a controller's local ROS 2 JointState topic or inspect an
+existing rosbag2 recording against the assembled rig's URDF. Both commands report
+joint coverage, position bounds and timing. They operate independently of the hosted
+simulator and send no actuator commands.
+
 **Under development.** Protected operator access supports authorized development
 and testing. Essential sign-in sessions, operator-linked synthetic task history and
 security diagnostics support that purpose. The owner has deferred the corresponding
@@ -106,7 +112,7 @@ flowchart LR
 | --- | --- | --- |
 | `onesa-ai-robot-frontend/` | Static HTML/CSS, generated TypeScript client, Node 24 proxy | [Frontend](onesa-ai-robot-frontend/README.md) |
 | `onesa-ai-robot-backend/` | Python 3.11, FastAPI, local private SQLite; cloud Turso journal | [Backend](onesa-ai-robot-backend/README.md) |
-| `edge/` and `ros2/` | Optional synthetic telemetry; preparatory ROS 2 Jazzy messages | [ROS boundary](ros2/README.md) |
+| `edge/` and `ros2/` | Synthetic edge telemetry, ROS 2 Jazzy interfaces and read-only bench feedback checks | [ROS guide](ros2/README.md) |
 | `docs/engineering/` | Architecture, tests, onboarding and release procedures | [Start here](docs/engineering/ENGINEERING_ONBOARDING.md) |
 
 Use Python 3.11 and Node 24. For the smallest local setup, install the backend's
