@@ -22,7 +22,7 @@ async function fixture() {
   logout(){calls.logout++;return Promise.resolve({});}
   cancel(){calls.cancel++;return Promise.resolve({});}
  }
- const context={RobotClient,createInspection:()=>({reset(){},authenticate(){},stale(){},refresh(){},hasPending(){return false;}}),document:{addEventListener(){},getElementById:node,activeElement:{closest:()=>unrelated},querySelectorAll:()=>[],createElement:()=>node('li')},window:{addEventListener(){}},setInterval(){return 1;},clearInterval(){},AbortController,AbortSignal,setTimeout,Date,performance};
+ const context={RobotClient,createInspection:()=>({reset(){},authenticate(){},stale(){},refresh(){},hasPending(){return false;}}),document:{addEventListener(){},getElementById:node,activeElement:{closest:()=>unrelated},querySelectorAll:()=>[],createElement:()=>node('li')},window:{location:{hostname:"localhost"},addEventListener(){}},setInterval(){return 1;},clearInterval(){},AbortController,AbortSignal,setTimeout,Date,performance};
  vm.createContext(context);vm.runInContext(source,context);
  function submit(){const event={currentTarget:form,preventDefault(){}};handlers.get('reset-form:submit')(event);event.currentTarget=null;}
  const tick=()=>new Promise(resolve=>setImmediate(resolve));

@@ -254,7 +254,7 @@ def test_approval_rechecks_staleness_and_owner(api):
 
 
 def test_login_limit_and_secure_cookie(config):
-    config.public_origin = "https://robot.example.invalid"
+    config.public_origin = "https://localhost"
     with TestClient(create_app(config), base_url=config.public_origin) as client:
         client.headers["Origin"] = config.public_origin
         assert "Secure" in login(client).headers["set-cookie"]
@@ -271,6 +271,15 @@ def test_login_limit_and_secure_cookie(config):
             ).status_code
             == 429
         )
+
+
+def test_hosted_console_rejects_product_password_when_portal_is_unconfigured(config):
+    config.public_origin = "https://robot.example.invalid"
+    with TestClient(create_app(config), base_url=config.public_origin) as client:
+        client.headers["Origin"] = config.public_origin
+        result = client.post("/api/v1/auth/login", json={"name": "operator", "password": PASSWORD})
+        assert result.status_code == 403
+        assert "set-cookie" not in result.headers
 
 
 def test_gate_limits_and_actuation_disabled(config):
