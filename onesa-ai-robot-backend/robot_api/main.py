@@ -1054,7 +1054,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(403, "CSRF verification failed")
         result = dict(row)
         if not identity_config:
-            if not local_simulator and request.url.path not in {"/api/v1/stop", "/api/v1/auth/logout"}:
+            if not local_simulator and request.url.path not in {
+                "/api/v1/stop",
+                "/api/v1/auth/logout",
+            }:
                 raise HTTPException(401, "Sign in through Onesa Company Portal")
             return result
         linked = sim.identity_sessions.get(key)
