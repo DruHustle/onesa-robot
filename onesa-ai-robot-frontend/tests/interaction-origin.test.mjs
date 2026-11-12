@@ -7,7 +7,7 @@ import vm from 'node:vm';
 // form, as it can during WebKit button clicks. No backend or credentials enter.
 async function fixture() {
  const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace(/^import .*$/gm,'');
- const handlers=new Map(),nodes=new Map(),calls={reset:0,stop:0,logout:0,cancel:0};
+ const handlers=new Map(),nodes=new Map(),calls={reset:0,stop:0,logout:0,cancel:0,login:0};
  const form={querySelectorAll:()=>[],setAttribute(){},removeAttribute(){}};
  const unrelated={querySelectorAll:()=>[],setAttribute(){},removeAttribute(){}};
  let resolveReset;
@@ -16,6 +16,7 @@ async function fixture() {
  class RobotClient {
   constructor(){this.pending={signal:new AbortController().signal};}
   me(){return Promise.reject({status:401});}
+  login(){calls.login++;return Promise.resolve({});}
   reset(){calls.reset++;return reset;}
   stop(){calls.stop++;return Promise.resolve({});}
   logout(){calls.logout++;return Promise.resolve({});}
@@ -43,4 +44,22 @@ test('the originating form rejects duplicate submission regardless of focus',asy
  assert.equal(f.calls.reset,1);
  f.resolveReset({});await f.tick();f.submit();await f.tick();
  assert.equal(f.calls.reset,2);
+});
+
+
+test('a journal recovery response stops sign-in before sending credentials', async () => {
+ const f = await fixture();
+ await f.tick();
+ let readinessChecks = 0;
+ f.context.fetch = async (url) => {
+  assert.equal(url, '/api/v1/ready');
+  readinessChecks++;
+  return Response.json({detail:'Remote simulation journal requires recovery'}, {status:503});
+ };
+ f.handlers.get('login-form:submit')({currentTarget:{...f.form,id:'login-form'}, preventDefault(){}});
+ await f.tick();
+ assert.equal(readinessChecks, 1);
+ assert.equal(f.calls.login, 0);
+ assert.match(f.nodes.get('notice').textContent, /journal needs recovery.*Contact Onesa support/);
+ assert.equal(f.nodes.get('password').value, 'fixture-only');
 });
