@@ -1,5 +1,7 @@
 # Robot simulation API
 
+Hosted operator sessions require Company Portal. Local password login is limited to a loopback public origin. Existing authenticated stop and sign-out remain available during a cutover.
+
 Python 3.11 / FastAPI. Install independently:
 
 ```sh
