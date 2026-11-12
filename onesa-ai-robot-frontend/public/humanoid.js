@@ -31,9 +31,9 @@ function draw(positions) {
   $('humanoid-links').replaceChildren(...nodes);
 }
 function controls() {
-  const available=Boolean(model&&observation&&!busy&&!stopping&&!haltRequired&&!document.hidden&&client.canConfirm());
+  const available=Boolean(model&&observation?.connection==='simulated_actuators'&&!busy&&!stopping&&!haltRequired&&!document.hidden&&client.canConfirm());
   const occupied=Boolean(observation?.pending||observation?.active_command);
-  $('humanoid-propose').disabled=!available||occupied||observation.stopped||observation.connection!=='simulated_actuators';
+  $('humanoid-propose').disabled=!available||occupied||observation.stopped;
   $('humanoid-approve').disabled=!available||!observation?.pending||observation.stopped;
   $('humanoid-approval').hidden=!observation?.pending;
   const locked=!available||occupied;
@@ -45,6 +45,7 @@ function review(plan) {
   if(reviewedPlan===plan?.plan_sha256)return;
   reviewedPlan=plan?.plan_sha256;
   $('humanoid-password').value='';
+  $('humanoid-password-confirmed').checked=false;
   $('humanoid-plan').textContent=plan?`${Object.keys(plan.request.targets).length} joint targets over ${plan.request.duration_seconds} seconds. Confirm the exact start and target values below; Stop to discard this plan.`:'';
   $('humanoid-plan-values').replaceChildren();
   if(!plan)return;
@@ -62,6 +63,7 @@ function clear() {
   epoch++;client.cancelPending();client.csrf='';model=observation=null;busy=reading=false;reviewedPlan=null;
   $('humanoid-joints').replaceChildren();$('humanoid-links').replaceChildren();
   $('humanoid-plan').textContent='';$('humanoid-plan-values').replaceChildren();$('humanoid-password').value='';
+  $('humanoid-password-confirmed').checked=false;
   $('humanoid-state').textContent='Open this panel while signed in to load the reference model.';
   controls();
 }
@@ -101,7 +103,7 @@ async function refresh(force=false) {
     if(!verified(value))throw new Error('Humanoid telemetry could not be verified.');
     // Renew only this command after successfully observing it in its owning
     // session. The rest of the console cannot keep unobserved motion alive.
-    if(value.active_command&&value.owns_active&&!haltRequired)await client.humanoidHeartbeat(value.active_command);
+    if(value.connection==='simulated_actuators'&&!value.stopped&&value.active_command&&value.owns_active&&!haltRequired)await client.humanoidHeartbeat(value.active_command);
     if(current!==epoch)return;
     observation=value;
     supervising=Boolean(value.pending||value.owns_active);
@@ -112,7 +114,7 @@ async function refresh(force=false) {
   } catch(error) {
     if(current!==epoch)return;
     if(supervising)haltRequired=true;
-    observation=null;review(null);controls();
+    observation=null;$('humanoid-links').replaceChildren();review(null);controls();
     $('humanoid-state').textContent='Telemetry unavailable; heartbeat paused. Stop remains available.';
     if(error.status===401)depart();
   } finally {if(current===epoch)reading=false;}

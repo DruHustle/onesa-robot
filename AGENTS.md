@@ -1,5 +1,21 @@
 # Onesa engineering and agent policies
 
+## Local workspace and qualification evidence
+
+Keep extra checkouts under `local-tools/worktrees`, provider receipts under
+`local-tools/deployment-evidence`, verification scripts and logs under
+`local-tools/release-verification`, and migration records under
+`local-tools/migrations`. Do not create workspace-root evidence directories.
+Inspect current PRs and remote refs before changing overlapping operator or recovery
+work. The current dev candidate includes JointState/rosbag observation and simulated
+actuator-feedback checks; these do not qualify a physical controller or emergency stop.
+Use the pinned Python 3.11 requirements and Node 24 lockfile. Real loopback HTTP and
+subprocess tests need local network binding; sandbox EPERM is an environment failure
+to rerun with appropriate local access, never a reason to skip the required test.
+Keep installed toolchains, simulator acceptance, hosted release receipts and physical
+bench evidence distinct. The next hardware step requires the actual controller,
+encoder mapping, mechanical-limit review and independently tested physical stop.
+
 Authoritative agent/contribution/security policy for the standalone Robot product
 in `DruHustle/onesa-robot`.
 Read README, release checklist and relevant code/runbooks before edits. Continue
