@@ -290,6 +290,8 @@ window.addEventListener('pagehide',suspendRequests);
 window.addEventListener('pageshow',event=>{if(event.persisted){suspended=false;restoreSession();}});
 setObservationReady(false);
 byId('login-submit').disabled=false;
+const entryFallback=byId('account-entry-fallback');
+if(entryFallback)entryFallback.hidden=true;
 // Keep deliberate masked entries while the initial anonymous lookup settles.
 // Logout, explicit rejection and later session expiry still clear all passwords.
 restoreSession({initial:true});
