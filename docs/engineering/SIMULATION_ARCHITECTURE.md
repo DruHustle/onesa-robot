@@ -39,6 +39,15 @@ and are checked against peak velocity and acceleration before proposal. Limits a
 effort values are synthetic; a bank reporting physical actuation is rejected. No
 serial, CAN, DDS, ROS driver, device discovery or physical transport is opened.
 
+The synchronous simulator validates feedback from all 33 axes when preparing
+or approving a plan and reads the complete frame back after each write. A failed
+read, malformed frame or command/feedback mismatch latches a simulator fault,
+revokes the active or pending command and blocks reset and administrator permission.
+Only confirmed feedback can complete a motion. On a fault, inspect
+`/api/v1/humanoid/state` for `simulator_fault` and cancelled history. When current
+feedback is unavailable this route returns HTTP 503. Service readiness and sign-in
+stay available for diagnosis. Process recovery starts stopped and revokes sessions.
+
 The authenticated `/api/v1/humanoid` routes provide `model`, `model.urdf`, `state`,
 `proposals`, `proposals/{command_id}/approve` and a command-bound `heartbeat`.
 Mutations retain the existing session, exact Origin and CSRF checks. Approval binds

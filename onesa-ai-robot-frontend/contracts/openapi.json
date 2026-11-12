@@ -2637,6 +2637,19 @@
         "title": "RobotProfile",
         "type": "object"
       },
+      "ServiceError": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ServiceError",
+        "type": "object"
+      },
       "SessionResponse": {
         "properties": {
           "authentication_method": {
@@ -3315,6 +3328,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Allow Physical Permission"
@@ -3680,6 +3703,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid Propose"
@@ -3730,6 +3763,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid Approve"
@@ -3748,6 +3791,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid State"
@@ -4038,6 +4091,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Reset"

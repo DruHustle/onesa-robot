@@ -3,6 +3,7 @@ import {RobotClient} from './client.js';
 const client = new RobotClient();
 const byId = id => document.getElementById(id);
 let fastPoll=false,lastIdlePoll=0;
+const localSimulator = ['127.0.0.1','localhost','[::1]'].includes(window.location?.hostname);
 let identityEnabled=false,identitySession=false,identityOrigin='',identityConfirmationExpires=0,canOperate=true;
 let csrf = '', proposalId = '', timer, polling = null, generation=0, observationRevision=0, suspended=false, observationReady=false;
 const busyForms=new WeakSet();
@@ -19,7 +20,7 @@ function sessionPresentation(authenticated){
  if(heading)heading.textContent=authenticated?'Industrial inspection':'Operator Console';
  if(description)description.textContent=authenticated?'Plan, supervise and review a synthetic pump inspection. No physical device is connected.':'Use your approved operator account to access development simulation.';
 }
-function signedOut({preserveInitialSignIn=false}={}) {setIdentitySession({});inspector.reset();fastPoll=false;lastIdlePoll=0;sessionPresentation(false);setObservationReady(false);generation++; clearInterval(timer);csrf='';client.csrf='';proposalId='';administrator=false;permissionRevision=null;permissionRead=null;lastPermissionRead=0;byId('administrator').hidden=true;byId('physical-permission-state').textContent='Unavailable';byId('physical-operation-state').textContent='Unavailable';byId('operator').hidden=true;byId('login-form').hidden=identityEnabled;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=!identityEnabled;byId('approval-form').hidden=true;byId('history').replaceChildren();for(const field of document.querySelectorAll('input[type="password"]'))if(!preserveInitialSignIn||field.id!=='password')field.value=''; }
+function signedOut({preserveInitialSignIn=false}={}) {setIdentitySession({});inspector.reset();fastPoll=false;lastIdlePoll=0;sessionPresentation(false);setObservationReady(false);generation++; clearInterval(timer);csrf='';client.csrf='';proposalId='';setAdministrator({});byId('operator').hidden=true;byId('login-form').hidden=identityEnabled||!localSimulator;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=!(identityEnabled||!localSimulator);byId('approval-form').hidden=true;byId('history').replaceChildren();for(const field of document.querySelectorAll('input[type="password"]'))if(!preserveInitialSignIn||field.id!=='password')field.value=''; }
 function setIdentitySession(session){
  identitySession=session.authentication_method==='onesa';canOperate=session.role!=='viewer';
  identityConfirmationExpires=Number(session.confirmation_expires_at)||0;
@@ -59,11 +60,15 @@ async function startIdentity(stepUp=false){
  }catch(error){notice(error.message);if(button)button.disabled=false;}
 }
 async function configureIdentity(){
+ const localForm=byId('login-form'),central=byId('onesa-sign-in'),button=byId('onesa-sign-in-button');
+ localForm.hidden=!localSimulator;
+ if(!localSimulator){central.hidden=false;button.disabled=true;}
  if(typeof client.identityConfig!=='function')return;
  try{
   const value=await client.identityConfig();identityEnabled=value.enabled===true;
+  if(!identityEnabled&&!localSimulator)notice('Shared sign-in is not connected. Reload to retry or open Company Portal.');
   if(identityEnabled){
-   const account=new URL(value.account_url);identityOrigin=account.origin;
+   const account=new URL(value.account_url);identityOrigin=account.origin;button.disabled=false;
    const link=byId('onesa-account-link');if(link){link.href=account.href;link.hidden=false;}
    byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
    if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
@@ -78,23 +83,80 @@ async function configureIdentity(){
 byId('onesa-sign-in-button')?.addEventListener('click',()=>void startIdentity());
 byId('onesa-confirm-identity')?.addEventListener('click',()=>void startIdentity(true));
 void configureIdentity();
-function renderPhysicalPermission(value){
- if(!['allowed','blocked'].includes(value?.permission)||!Number.isSafeInteger(value.revision)||value.revision<0||value.controller_connection!=='not_connected'||value.controller_readiness!=='not_ready'||value.physical_operation!=='inactive'||value.physical_actuation!==false)throw new Error('Physical-operation state could not be verified.');
- if(permissionRevision!==null&&value.revision<permissionRevision)return;
+function updatePermissionControls() {
+ const form=byId('physical-permission-form');
+ byId('physical-permission-allow').disabled=!administrator || permissionRevision===null ||
+  busyForms.has(form) || (identitySession && identityConfirmationExpires<=Date.now()/1000);
+}
+function clearPermissionReview() {
+ byId('physical-permission-password').value='';
+ byId('physical-permission-password-confirmed').checked=false;
+}
+function clearPhysicalPermission() {
+ permissionRead=null;
+ permissionRevision=null;
+ clearPermissionReview();
+ for(const id of ['physical-permission-state','physical-controller-state','physical-operation-state','physical-permission-expiry']){
+  byId(id).textContent='Unavailable';
+ }
+ updatePermissionControls();
+}
+function renderPhysicalPermission(value) {
+ if(!['allowed','blocked'].includes(value?.permission) || !Number.isSafeInteger(value.revision) || value.revision<0 ||
+    !Number.isFinite(value.sampled_at) || (value.permission==='allowed'
+      ? !Number.isFinite(value.expires_at) || value.expires_at<=value.sampled_at
+      : value.expires_at!==null) ||
+    value.controller_connection!=='not_connected' || value.controller_readiness!=='not_ready' ||
+    value.physical_operation!=='inactive' || value.physical_actuation!==false){
+  throw new Error('Physical-operation state could not be verified.');
+ }
+ if(permissionRevision!==null && value.revision<permissionRevision){
+  throw new Error('Physical-permission revision moved backwards.');
+ }
+ if(permissionRevision!==value.revision)clearPermissionReview();
  permissionRevision=value.revision;
- byId('physical-permission-state').textContent=value.permission==='allowed'?'Allowed for this administrator session':'Blocked by administrator';
+ byId('physical-permission-state').textContent=value.permission==='allowed'?'Allowed for the issuing administrator session':'Blocked';
  byId('physical-controller-state').textContent='Not connected · hardware integration under development';
  byId('physical-operation-state').textContent='Inactive · controller not connected';
  byId('physical-permission-expiry').textContent=value.expires_at?new Date(value.expires_at*1000).toLocaleString():'No active permission';
+ updatePermissionControls();
 }
-async function readPhysicalPermission(){
- if(!administrator||suspended||permissionRead)return;
- const owner={},current=generation;permissionRead=owner;lastPermissionRead=performance.now();
- try{const value=await client.physicalPermission();if(current===generation&&administrator&&!suspended)renderPhysicalPermission(value);}
- catch(error){if(current!==generation||!administrator||suspended)return;permissionRevision=null;byId('physical-permission-state').textContent='Unavailable · last observation is stale';byId('physical-operation-state').textContent='Unknown · current state unavailable';if(error.status===401)signedOut();}
- finally{if(permissionRead===owner)permissionRead=null;}
+async function readPhysicalPermission() {
+ if(!administrator || suspended || permissionRead)return;
+ const owner={};
+ permissionRead=owner;
+ lastPermissionRead=performance.now();
+ try{
+  const value=await client.physicalPermission();
+  if(permissionRead===owner)renderPhysicalPermission(value);
+ }catch(error){
+  if(permissionRead!==owner)return;
+  clearPhysicalPermission();
+  if(error.status===401)signedOut();
+ }finally{
+  if(permissionRead===owner)permissionRead=null;
+ }
 }
-function setAdministrator(session){administrator=session.role==='administrator';permissionRevision=null;permissionRead=null;lastPermissionRead=0;byId('administrator').hidden=!administrator;if(administrator)void readPhysicalPermission();}
+function setAdministrator(session) {
+ administrator=session.role==='administrator';
+ clearPhysicalPermission();
+ lastPermissionRead=0;
+ byId('administrator').hidden=!administrator;
+ if(administrator)void readPhysicalPermission();
+}
+async function changePhysicalPermission(change,current) {
+ // A mutation can reach the server even if its response is lost. Re-read the
+ // current permission after it settles, including when another session blocked it.
+ clearPhysicalPermission();
+ try{
+  await change();
+ }finally{
+  if(current===generation && administrator && !suspended){
+   permissionRead=null;
+   await readPhysicalPermission();
+  }
+ }
+}
 function verifiedObservation(status,tasks){
  return status?.mode==='simulation'&&status.physical_actuation===false&&typeof status.stopped==='boolean'&&
   Number.isFinite(status.position_radians)&&Number.isFinite(status.sampled_at)&&
@@ -105,6 +167,10 @@ async function refresh(force=true) {
   if(document.hidden||!force&&!fastPoll&&performance.now()-lastIdlePoll<3000)return;
   if(suspended || !csrf) return;
   updateIdentityConfirmation();
+  if(administrator){
+    updatePermissionControls();
+    if(performance.now()-lastPermissionRead>5000)void readPhysicalPermission();
+  }
   if(polling){
     if(!force)return;
     const previous=polling;await previous.settled;
@@ -142,7 +208,6 @@ async function refresh(force=true) {
     if(!tasks.length){const li=document.createElement('li');li.textContent='No simulation tasks yet. Reset the stop state to create a proposal.';byId('history').append(li);}
     setObservationReady(true);
     void inspector.refresh(status);
-    if(administrator&&performance.now()-lastPermissionRead>5000)void readPhysicalPermission();
   } catch(error) {if(current!==generation) return;if(error.status===401){signedOut();notice(error.message);return;}if(revision!==observationRevision)return;setObservationReady(false);byId('reset-form').hidden=false;inspector.stale();byId('stop-state').textContent='Unavailable — current observation could not be verified';byId('connection').textContent='Disconnected — telemetry is stale; the gateway watchdog stops running simulation tasks.';byId('position').textContent='Stale · latest response unavailable';byId('next-step').textContent=operatorNextStep(null,'');notice(error.message);}
   finally {await Promise.allSettled(observations);if(polling===owner)polling=null;owner.finish();}
 }
@@ -158,6 +223,12 @@ async function waitForSimulator() {
         let state;try{state=await response.json();}catch{throw new Error('Simulator readiness could not be verified. Try signing in after service recovery.');}
         if(state?.status==='ready'&&state.mode==='simulation'&&state.physical_actuation===false)return;
         throw new Error('Simulator readiness could not be verified. Try signing in after service recovery.');
+      }
+      if (response.status === 503 && response.headers.get('content-type')?.includes('application/json')) {
+        const problem = await response.json().catch(() => null);
+        if (problem?.detail === 'Remote simulation journal requires recovery') {
+          throw new Error('The simulation journal needs recovery before you can sign in. Contact Onesa support. Your sign-in details have not been sent.');
+        }
       }
       if(![502,503,504].includes(response.status))throw new Error('Simulator readiness request was rejected. Try signing in after service recovery.');
     } catch(error) {
@@ -176,11 +247,11 @@ async function run(action, success, form=null,expectedGeneration=null) {
   if(form){busyForms.add(form);form.setAttribute('aria-busy','true');controls.forEach(control=>control.disabled=true);}
   try {await action();if(suspended||expectedGeneration!==null&&expectedGeneration!==generation)return;observationRevision++;setObservationReady(false);inspector.stale();notice(success);await refresh();}
   catch(error){if(suspended||expectedGeneration!==null&&expectedGeneration!==generation)return;if(error.status===401) signedOut();notice(form?.id==='login-form'&&([502,503,504].includes(error.status)||['AbortError','TimeoutError','TypeError'].includes(error.name))?unavailableSignIn:error.message);}
-  finally{if(form){busyForms.delete(form);form.removeAttribute('aria-busy');controls.forEach(control=>control.disabled=observationForms.some(([id])=>id===form.id)&&!observationReady);}}
+  finally{if(form){busyForms.delete(form);form.removeAttribute('aria-busy');controls.forEach(control=>control.disabled=observationForms.some(([id])=>id===form.id)&&!observationReady);if(form.id==='physical-permission-form')updatePermissionControls();}}
 }
 byId('login-form').addEventListener('submit',event=>{
   event.preventDefault();
-  if(suspended||busyForms.has(event.currentTarget))return;
+  if(!localSimulator||identityEnabled||suspended||busyForms.has(event.currentTarget))return;
   // Capture this deliberate submission before readiness or restoration settles.
   // Its generation supersedes the anonymous bootstrap read, not another account.
   const credentials={name:byId('name').value,password:byId('password').value},current=++generation;
@@ -193,8 +264,17 @@ byId('login-form').addEventListener('submit',event=>{
     csrf=session.csrf;client.csrf=csrf;setIdentitySession(session);setAdministrator(session);byId('login-form').hidden=true;byId('operator').hidden=false;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=true;sessionPresentation(true);inspector.authenticate();timer=setInterval(()=>refresh(false),500);
   },'Signed in.',event.currentTarget,current);
 });
-byId('physical-permission-form').addEventListener('submit',event=>{event.preventDefault();const confirmation=readConfirmation('physical-permission-password'),revision=permissionRevision,current=generation;byId('physical-permission-password').value='';run(async()=>{if(!administrator||revision===null)throw new Error('Refresh and review the current administrator permission before allowing operation.');const value=await client.allowPhysical({...confirmation,expected_revision:revision});if(current===generation&&administrator&&!suspended)renderPhysicalPermission(value);},'Permission request completed. The current confirmed state is shown in Robot administration; no movement started.',event.currentTarget,current);});
-byId('block-physical-permission').addEventListener('click',()=>{const current=generation;run(async()=>{const value=await client.blockPhysical();if(current===generation&&administrator&&!suspended)renderPhysicalPermission(value);},'Administrator permission blocked.',null,current);});
+byId('physical-permission-form').addEventListener('submit',event=>{
+ event.preventDefault();
+ if(byId('physical-permission-allow').disabled)return;
+ const current=generation,revision=permissionRevision,confirmation=readConfirmation('physical-permission-password');
+ run(()=>changePhysicalPermission(()=>client.allowPhysical({...confirmation,expected_revision:revision}),current),
+  'Permission request completed.',event.currentTarget,current);
+});
+byId('block-physical-permission').addEventListener('click',()=>{
+ const current=generation;
+ run(()=>changePhysicalPermission(()=>client.blockPhysical(),current),'Block request completed.',null,current);
+});
 byId('reset-form').addEventListener('submit',event=>{event.preventDefault();const confirmation=readConfirmation('reset-password');run(()=>client.reset(confirmation),'Simulation stop reset.',event.currentTarget);});
 byId('proposal-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{const target=Number(byId('target').value),duration=Number(byId('duration').value);const data=await client.propose({command_id:crypto.randomUUID(),issued_at:Date.now()/1000,target_radians:target,duration_seconds:duration});proposalId=data.id;byId('proposal-summary').textContent=`Target ${target} radians over ${duration} seconds. Review this synthetic movement before confirming. Approval expires after 15 seconds.`;byId('proposed-id').textContent=proposalId;byId('approval-form').hidden=false;byId(identitySession?'approve-password-confirmed':'approve-password').focus();},'Proposal created. Confirm within 15 seconds.',event.currentTarget);});
 byId('approval-form').addEventListener('submit',event=>{event.preventDefault();const confirmation=readConfirmation('approve-password');run(async()=>{await client.approve(proposalId,confirmation);byId('approval-form').hidden=true;proposalId='';},'Simulation running; heartbeat must remain connected.',event.currentTarget);});
@@ -204,12 +284,14 @@ byId('logout').addEventListener('click',()=>run(async()=>{const result=await cli
 // No localStorage/sessionStorage, token URLs or persistence of operator credentials.
 
 function restoreSession({initial=false}={}){const current=++generation;return client.me().then(session=>{if(current!==generation)return;csrf=session.csrf;client.csrf=csrf;setIdentitySession(session);setAdministrator(session);byId('login-form').hidden=true;byId('operator').hidden=false;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=true;sessionPresentation(true);inspector.authenticate();timer=setInterval(()=>refresh(false),500);return refresh();}).catch(error=>{if(current!==generation)return;if(error.status===401)signedOut({preserveInitialSignIn:initial});else if(error.name!=='AbortError')notice(error.message);});}
-function suspendRequests(){inspector.stale();setObservationReady(false);suspended=true;generation++;clearInterval(timer);client.cancelPending();polling=null;}
+function suspendRequests(){clearPhysicalPermission();inspector.stale();setObservationReady(false);suspended=true;generation++;clearInterval(timer);client.cancelPending();polling=null;}
 window.addEventListener('beforeunload',suspendRequests);
 window.addEventListener('pagehide',suspendRequests);
 window.addEventListener('pageshow',event=>{if(event.persisted){suspended=false;restoreSession();}});
 setObservationReady(false);
 byId('login-submit').disabled=false;
+const entryFallback=byId('account-entry-fallback');
+if(entryFallback)entryFallback.hidden=true;
 // Keep deliberate masked entries while the initial anonymous lookup settles.
 // Logout, explicit rejection and later session expiry still clear all passwords.
 restoreSession({initial:true});

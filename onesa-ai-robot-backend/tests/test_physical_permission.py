@@ -102,6 +102,25 @@ def test_allow_and_block_are_separate_from_actual_hardware_state(administrator):
     assert client.get(BASE).headers["cache-control"] == "no-store"
 
 
+def test_feedback_loss_revokes_permission_and_blocks_new_allow(administrator, monkeypatch):
+    client, app = administrator
+    assert allow(client).status_code == 200
+    with monkeypatch.context() as patch:
+        patch.setattr(app.state.sim.humanoid.bank, "read", lambda: {})
+        assert client.get("/api/v1/humanoid/state").status_code == 503
+    permission = client.get(BASE).json()
+    assert permission["permission"] == "blocked" and permission["physical_actuation"] is False
+    assert allow(client, permission["revision"]).status_code == 503
+    assert client.post(BASE + "/block", json={}).status_code == 200
+
+
+def test_allow_checks_feedback_before_granting_permission(administrator, monkeypatch):
+    client, app = administrator
+    monkeypatch.setattr(app.state.sim.humanoid.bank, "read", lambda: {})
+    assert allow(client).status_code == 503
+    assert client.get(BASE).json()["permission"] == "blocked"
+
+
 def test_origin_csrf_password_and_request_shape_still_apply(administrator):
     client, _ = administrator
     revision = client.get(BASE).json()["revision"]

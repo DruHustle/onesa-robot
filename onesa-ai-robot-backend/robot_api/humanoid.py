@@ -6,7 +6,6 @@ No serial, CAN, DDS or physical actuator transport is opened by this module.
 
 import hashlib
 import json
-import math
 import secrets
 from collections import deque
 from dataclasses import dataclass
@@ -163,13 +162,25 @@ class Observation(Strict):
 
 
 class ActuatorBank(Protocol):
-    """A future driver must preserve whole-frame validation and feedback semantics."""
+    """Synchronous simulation interface. A completed write is readable immediately."""
 
     physical_actuation: bool
 
     def read(self) -> dict[str, float]: ...
     def write(self, positions: dict[str, float]) -> None: ...
     def stop(self) -> None: ...
+
+
+class ActuatorFault(RuntimeError):
+    """The simulator cannot establish a trustworthy whole-body actuator state."""
+
+
+def validate_frame(positions: dict[str, float]) -> None:
+    if positions.keys() != BY_NAME.keys() or any(
+        type(value) not in (int, float) or not BY_NAME[name].lower <= value <= BY_NAME[name].upper
+        for name, value in positions.items()
+    ):
+        raise ValueError("Invalid actuator frame")
 
 
 class SimulatedActuators:
@@ -183,11 +194,7 @@ class SimulatedActuators:
 
     def write(self, positions: dict[str, float]) -> None:
         # Validate the entire frame before changing any joint.
-        if positions.keys() != BY_NAME.keys() or any(
-            not math.isfinite(v) or not BY_NAME[k].lower <= v <= BY_NAME[k].upper
-            for k, v in positions.items()
-        ):
-            raise ValueError("Invalid actuator frame")
+        validate_frame(positions)
         self.positions = positions.copy()
 
     def stop(self) -> None:
@@ -218,6 +225,30 @@ class Humanoid:
         self.faulted = False
         self.velocities = dict.fromkeys(BY_NAME, 0.0)
 
+    def require_healthy(self) -> None:
+        if self.faulted:
+            raise ActuatorFault("Simulated actuator fault requires process recovery")
+
+    def verified_positions(self) -> dict[str, float]:
+        self.require_healthy()
+        return self._actuator_frame()
+
+    def _actuator_frame(self, commanded: dict[str, float] | None = None) -> dict[str, float]:
+        try:
+            if commanded is not None:
+                validate_frame(commanded)
+                self.bank.write(commanded.copy())
+            feedback = self.bank.read().copy()
+            validate_frame(feedback)
+            if commanded is not None and feedback != commanded:
+                raise ValueError("Incomplete simulated frame application")
+            return feedback
+        except Exception:
+            if not self.faulted:
+                self.faulted = True
+                self.stop("actuator_failure")
+            raise ActuatorFault("Simulated actuator feedback failed; command stopped") from None
+
     @staticmethod
     def fresh(request: MotionRequest, now: float) -> None:
         if not 0 <= now - request.issued_at <= 15:
@@ -225,15 +256,13 @@ class Humanoid:
 
     def propose(self, request: MotionRequest, owner: str, now: float) -> MotionPlan:
         self.fresh(request, now)
-        if self.faulted:
-            raise ValueError("Simulated actuator fault requires process recovery")
         if self.active or self.pending:
             raise ValueError("Cancel or complete the existing humanoid proposal first")
         if request.command_id in self.commands:
             raise ValueError("Humanoid commands cannot be replayed")
         if len(self.commands) >= 10000:
             raise ValueError("Humanoid command capacity reached; process recovery required")
-        start = self.bank.read()
+        start = self.verified_positions()
         target = start.copy()
         for key, value in request.targets.items():
             joint = BY_NAME.get(key)
@@ -271,10 +300,9 @@ class Humanoid:
             json.dumps(payload, sort_keys=True, allow_nan=False).encode()
         ).hexdigest()
         if (
-            self.faulted
-            or plan.request.command_id != identifier
+            plan.request.command_id != identifier
             or plan.revision != self.revision
-            or self.bank.read() != plan.start
+            or self.verified_positions() != plan.start
             or not secrets.compare_digest(plan.plan_sha256, digest)
             or not secrets.compare_digest(plan.plan_sha256, verified_digest)
         ):
@@ -312,15 +340,12 @@ class Humanoid:
             10 * t**3 - 15 * t**4 + 6 * t**5,
             (30 * t**2 - 60 * t**3 + 30 * t**4) / duration,
         )
-        positions = {
-            k: start + (plan.targets[k] - start) * blend for k, start in plan.start.items()
-        }
-        try:
-            self.bank.write(positions)
-        except Exception:
-            self.faulted = True
-            self.stop("actuator_failure")
-            raise ValueError("Simulated actuator frame failed; command stopped") from None
+        positions = (
+            plan.targets
+            if t >= 1
+            else {k: start + (plan.targets[k] - start) * blend for k, start in plan.start.items()}
+        )
+        self._actuator_frame(positions)
         self.velocities = {k: (plan.targets[k] - start) * rate for k, start in plan.start.items()}
         if t >= 1:
             self.history.append(
@@ -333,7 +358,7 @@ class Humanoid:
             connection="simulator_fault" if self.faulted else "simulated_actuators",
             stopped=stopped,
             revision=self.revision,
-            positions=self.bank.read(),
+            positions=self._actuator_frame(),
             velocities=self.velocities.copy(),
             active_command=str(self.active.plan.request.command_id) if self.active else None,
             owns_active=self.active is not None and self.active.owner == owner,
