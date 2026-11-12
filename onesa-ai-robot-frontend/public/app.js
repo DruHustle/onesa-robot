@@ -219,6 +219,12 @@ async function waitForSimulator() {
         if(state?.status==='ready'&&state.mode==='simulation'&&state.physical_actuation===false)return;
         throw new Error('Simulator readiness could not be verified. Try signing in after service recovery.');
       }
+      if (response.status === 503 && response.headers.get('content-type')?.includes('application/json')) {
+        const problem = await response.json().catch(() => null);
+        if (problem?.detail === 'Remote simulation journal requires recovery') {
+          throw new Error('The simulation journal needs recovery before you can sign in. Contact Onesa support. Your sign-in details have not been sent.');
+        }
+      }
       if(![502,503,504].includes(response.status))throw new Error('Simulator readiness request was rejected. Try signing in after service recovery.');
     } catch(error) {
       if(lifecycle.aborted || suspended)throw error;
