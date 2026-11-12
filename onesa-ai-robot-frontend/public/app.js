@@ -3,6 +3,7 @@ import {RobotClient} from './client.js';
 const client = new RobotClient();
 const byId = id => document.getElementById(id);
 let fastPoll=false,lastIdlePoll=0;
+const localSimulator = ['127.0.0.1','localhost','[::1]'].includes(window.location?.hostname);
 let identityEnabled=false,identitySession=false,identityOrigin='',identityConfirmationExpires=0,canOperate=true;
 let csrf = '', proposalId = '', timer, polling = null, generation=0, observationRevision=0, suspended=false, observationReady=false;
 const busyForms=new WeakSet();
@@ -19,7 +20,7 @@ function sessionPresentation(authenticated){
  if(heading)heading.textContent=authenticated?'Industrial inspection':'Operator Console';
  if(description)description.textContent=authenticated?'Plan, supervise and review a synthetic pump inspection. No physical device is connected.':'Use your approved operator account to access development simulation.';
 }
-function signedOut({preserveInitialSignIn=false}={}) {setIdentitySession({});inspector.reset();fastPoll=false;lastIdlePoll=0;sessionPresentation(false);setObservationReady(false);generation++; clearInterval(timer);csrf='';client.csrf='';proposalId='';setAdministrator({});byId('operator').hidden=true;byId('login-form').hidden=identityEnabled;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=!identityEnabled;byId('approval-form').hidden=true;byId('history').replaceChildren();for(const field of document.querySelectorAll('input[type="password"]'))if(!preserveInitialSignIn||field.id!=='password')field.value=''; }
+function signedOut({preserveInitialSignIn=false}={}) {setIdentitySession({});inspector.reset();fastPoll=false;lastIdlePoll=0;sessionPresentation(false);setObservationReady(false);generation++; clearInterval(timer);csrf='';client.csrf='';proposalId='';setAdministrator({});byId('operator').hidden=true;byId('login-form').hidden=identityEnabled||!localSimulator;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=!(identityEnabled||!localSimulator);byId('approval-form').hidden=true;byId('history').replaceChildren();for(const field of document.querySelectorAll('input[type="password"]'))if(!preserveInitialSignIn||field.id!=='password')field.value=''; }
 function setIdentitySession(session){
  identitySession=session.authentication_method==='onesa';canOperate=session.role!=='viewer';
  identityConfirmationExpires=Number(session.confirmation_expires_at)||0;
@@ -59,11 +60,15 @@ async function startIdentity(stepUp=false){
  }catch(error){notice(error.message);if(button)button.disabled=false;}
 }
 async function configureIdentity(){
+ const localForm=byId('login-form'),central=byId('onesa-sign-in'),button=byId('onesa-sign-in-button');
+ localForm.hidden=!localSimulator;
+ if(!localSimulator){central.hidden=false;button.disabled=true;}
  if(typeof client.identityConfig!=='function')return;
  try{
   const value=await client.identityConfig();identityEnabled=value.enabled===true;
+  if(!identityEnabled&&!localSimulator)notice('Shared sign-in is not connected. Reload to retry or open Company Portal.');
   if(identityEnabled){
-   const account=new URL(value.account_url);identityOrigin=account.origin;
+   const account=new URL(value.account_url);identityOrigin=account.origin;button.disabled=false;
    const link=byId('onesa-account-link');if(link){link.href=account.href;link.hidden=false;}
    byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
    if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
@@ -246,7 +251,7 @@ async function run(action, success, form=null,expectedGeneration=null) {
 }
 byId('login-form').addEventListener('submit',event=>{
   event.preventDefault();
-  if(suspended||busyForms.has(event.currentTarget))return;
+  if(!localSimulator||identityEnabled||suspended||busyForms.has(event.currentTarget))return;
   // Capture this deliberate submission before readiness or restoration settles.
   // Its generation supersedes the anonymous bootstrap read, not another account.
   const credentials={name:byId('name').value,password:byId('password').value},current=++generation;

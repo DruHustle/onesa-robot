@@ -806,6 +806,7 @@ Session = dict[str, Any]
 def create_app(settings: Settings | None = None) -> FastAPI:
     config = settings or Settings()
     identity_config = config.identity_configuration() if config.identity_enabled else None
+    local_simulator = urlsplit(config.public_origin).hostname in {"localhost", "127.0.0.1", "::1"}
 
     @asynccontextmanager
     async def lifespan(app):
@@ -1053,6 +1054,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(403, "CSRF verification failed")
         result = dict(row)
         if not identity_config:
+            if not local_simulator and request.url.path not in {"/api/v1/stop", "/api/v1/auth/logout"}:
+                raise HTTPException(401, "Sign in through Onesa Company Portal")
             return result
         linked = sim.identity_sessions.get(key)
         if linked is None:
@@ -1429,7 +1432,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/v1/auth/login", response_model=SessionResponse)
     async def login(value: Login, request: Request, response: Response):
-        if identity_config:
+        if identity_config or not local_simulator:
             raise HTTPException(403, "Use your Onesa account to sign in")
         sim = state(request)
         # No forwarded header trust. A single configured operator; failures are global

@@ -1,5 +1,7 @@
 # Changelog
 
+- The hosted console sends account creation and sign-in to Company Portal and refuses local operator passwords. Loopback simulations retain their operator fixture.
+
 ## Unreleased
 
 - Preserve a masked sign-in password typed while the initial anonymous session
@@ -318,7 +320,7 @@ deployed by this revision.
 
 ## 2026-10-13 — Software simulation production baseline
 
-First verified production go-live of the authenticated Onesa AI Robot software
+First verified production go-live of the authenticated Onesa Robot software
 simulator at https://robot.onesa.eu, source
 `b0d40c6d2ccab2b1663166ebf311b4a9755ad045`.
 
