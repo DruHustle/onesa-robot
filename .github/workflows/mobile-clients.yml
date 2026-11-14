@@ -9,7 +9,7 @@ permissions:
   contents: read
 concurrency:
   group: mobile-clients-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 defaults:
   run:
     working-directory: onesa-ai-robot-frontend/mobile
@@ -44,17 +44,42 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_17_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          "$sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+          "$sdkmanager" 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'emulator' 'system-images;android-33;google_apis;x86_64'
           # The Expo template uses its development signing key for local Release.
           # It contains the JS bundle and requires no Metro connection.
           cd android
-          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --console=plain
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --console=plain
           apk=app/build/outputs/apk/release/app-release.apk
           unzip -l "$apk" | grep 'assets/index.android.bundle'
           mkdir -p "$RUNNER_TEMP/native"
           cp "$apk" "$RUNNER_TEMP/native/internal-test.apk"
           cd "$RUNNER_TEMP/native"
           sha256sum internal-test.apk > SHA256SUMS
+      - name: Install and exercise the exact retained APK on Android 13
+        if: matrix.platform == 'android'
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm
+          sudo chown root:"$(id -gn)" /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          image='system-images;android-33;google_apis;x86_64'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name native-smoke --package "$image" --device pixel_6 <<< no
+          "$ANDROID_HOME/emulator/emulator" -avd native-smoke -port 5564 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          trap 'adb -s emulator-5564 emu kill >/dev/null 2>&1 || true' EXIT
+          adb -s emulator-5564 wait-for-device
+          timeout 250 bash -c 'until [[ "$(adb -s emulator-5564 shell getprop sys.boot_completed | tr -d "\r")" == 1 ]]; do sleep 2; done'
+          adb -s emulator-5564 shell input keyevent KEYCODE_WAKEUP
+          adb -s emulator-5564 shell wm dismiss-keyguard
+          adb -s emulator-5564 install --no-streaming "$RUNNER_TEMP/native/internal-test.apk"
+          adb -s emulator-5564 shell am start -W -n eu.onesa.robot/.MainActivity
+          for attempt in $(seq 1 24); do
+            adb -s emulator-5564 shell uiautomator dump /sdcard/onesa-screen.xml >/dev/null
+            adb -s emulator-5564 pull /sdcard/onesa-screen.xml "$RUNNER_TEMP/screen.xml" >/dev/null
+            if grep -qi 'sign in with onesa' "$RUNNER_TEMP/screen.xml" && grep -q 'package="eu.onesa.robot"' "$RUNNER_TEMP/screen.xml"; then exit 0; fi
+            sleep 2
+          done
+          echo 'Installed application did not render its Onesa sign-in action.'
+          exit 1
       - name: Compile, install and launch on an iPhone simulator
         if: matrix.platform == 'ios'
         run: |
