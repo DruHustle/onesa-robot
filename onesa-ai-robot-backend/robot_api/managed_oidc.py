@@ -59,7 +59,10 @@ def claims(config: IdentityConfig, token: str, audience: str) -> dict[str, Any]:
     header = jwt.get_unverified_header(token)
     if header.get("alg") != "RS256" or header.get("crit"):
         raise rejected()
-    key = public_keys(config.public_jwks).get(header.get("kid"))
+    kid = header.get("kid")
+    if not isinstance(kid, str) or not kid:
+        raise rejected()
+    key = public_keys(config.public_jwks).get(kid)
     if key is None:
         raise rejected()
     return jwt.decode(
