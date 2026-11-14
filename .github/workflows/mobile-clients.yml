@@ -15,6 +15,7 @@ defaults:
     working-directory: onesa-ai-robot-frontend/mobile
 jobs:
   native:
+    if: ${{ github.event.repository.private == false || vars.ONESA_PRIVATE_HOSTED_VALIDATION_ENABLED == 'true' }}
     strategy:
       fail-fast: false
       matrix:
