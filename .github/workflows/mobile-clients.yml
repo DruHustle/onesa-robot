@@ -9,7 +9,7 @@ permissions:
   contents: read
 concurrency:
   group: mobile-clients-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 defaults:
   run:
     working-directory: onesa-ai-robot-frontend/mobile
@@ -60,6 +60,8 @@ jobs:
         if: matrix.platform == 'android'
         run: |
           set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb version
           test -c /dev/kvm
           sudo chown root:"$(id -gn)" /dev/kvm
           sudo chmod g+rw /dev/kvm
