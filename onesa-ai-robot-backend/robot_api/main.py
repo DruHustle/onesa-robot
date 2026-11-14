@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -145,6 +145,13 @@ class Settings(BaseSettings):
             raise ValueError("Invalid operator password hash")
         return self
 
+    identity_audience: str = Field(default="", validation_alias="ONESA_IDENTITY_AUDIENCE")
+    identity_public_jwks: str = Field(default="", validation_alias="ONESA_IDENTITY_JWKS")
+    identity_mapping_issuer: str = Field(
+        default="", validation_alias="ONESA_IDENTITY_MAPPING_ISSUER"
+    )
+    identity_account_url: str = Field(default="", validation_alias="ONESA_IDENTITY_ACCOUNT_URL")
+
     def identity_configuration(self) -> identity.IdentityConfig:
         return identity.IdentityConfig(
             issuer=self.identity_issuer,
@@ -152,6 +159,10 @@ class Settings(BaseSettings):
             client_secret=self.identity_client_secret.get_secret_value(),
             redirect_uri=self.identity_callback_url,
             product="robot",
+            audience=self.identity_audience,
+            public_jwks=self.identity_public_jwks,
+            mapping_issuer=self.identity_mapping_issuer,
+            account_url=self.identity_account_url,
             allow_local_http=self.deployment_environment == "local",
         )
 
@@ -171,9 +182,17 @@ class Confirmation(BaseModel):
 class IdentityStart(BaseModel):
     model_config = ConfigDict(extra="forbid")
     step_up: bool = False
+    mobile: bool = False
+
+
+class MobileExchange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    state: str = Field(pattern=r"^native_[A-Za-z0-9_-]{43}$")
+    code: str = Field(min_length=1, max_length=4096)
 
 
 class IdentityConfigurationResponse(BaseModel):
+    authorization_endpoint: str | None = None
     enabled: bool
     account_url: str | None = None
 
@@ -184,6 +203,7 @@ class IdentityStartResponse(BaseModel):
 
 @dataclass(frozen=True)
 class IdentityFlow:
+    nonce: str
     browser_hash: str
     verifier: str = field(repr=False)
     expires: float
@@ -1009,7 +1029,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def identity_owner(principal: identity.Identity) -> str:
         # Email is a display/contact attribute, never an account-linking key.
-        value = principal.issuer + "\x00" + principal.subject
+        namespace = (identity_config.mapping_issuer if identity_config else "") or principal.issuer
+        value = namespace + "\x00" + principal.subject
         return "sso:" + hashlib.sha256(value.encode()).hexdigest()
 
     def identity_role(
@@ -1260,12 +1281,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "deployment_environment": config.deployment_environment,
         }
 
-    @app.get("/api/v1/auth/identity/config", response_model=IdentityConfigurationResponse)
+    @app.get(
+        "/api/v1/auth/identity/config",
+        response_model=IdentityConfigurationResponse,
+        response_model_exclude_unset=True,
+    )
     async def identity_configuration():
         issuer = urlsplit(identity_config.issuer) if identity_config else None
         return {
             "enabled": identity_config is not None,
-            "account_url": f"{issuer.scheme}://{issuer.netloc}/account" if issuer else None,
+            **(
+                {"authorization_endpoint": identity_config.issuer + "authorize"}
+                if identity_config and identity_config.audience
+                else {}
+            ),
+            "account_url": (
+                identity_config.account_url or f"{issuer.scheme}://{issuer.netloc}/account"
+            )
+            if issuer and identity_config
+            else None,
         }
 
     @app.post("/api/v1/auth/identity/start", response_model=IdentityStartResponse)
@@ -1302,8 +1336,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(429, "Sign-in is busy. Please wait before trying again")
         attempts.append(time.monotonic())
         state_value, nonce, verifier = identity.new_transaction()
+        if value.mobile:
+            if value.step_up:
+                raise HTTPException(422, "Start a new mobile sign-in")
+            state_value = "native_" + state_value
         browser = secrets.token_urlsafe(32)
         sim.identity_flows[token_hash(state_value)] = IdentityFlow(
+            nonce=nonce,
             browser_hash=token_hash(browser),
             verifier=verifier,
             expires=now + 600,
@@ -1344,7 +1383,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["location"] = "/console?identity=failed"
             return response
         state_value = request.query_params.get("state", "")
-        flow = sim.identity_flows.pop(token_hash(state_value), None)
+        if state_value.startswith("native_"):
+            pending = sim.identity_flows.get(token_hash(state_value))
+            if (
+                not pending
+                or pending.expires <= time.time()
+                or request.query_params.get("iss", identity_config.issuer) != identity_config.issuer
+            ):
+                raise HTTPException(400, "Start sign-in again")
+            params = {"state": state_value}
+            code = request.query_params.get("code", "")
+            if "error" in request.query_params or not code or len(code) > 4096:
+                params["error"] = "cancelled"
+            else:
+                params["code"] = code
+            return RedirectResponse(
+                "onesarobot://account/callback?" + urlencode(params), status_code=303
+            )
+        return await finish_identity(
+            request, response, state_value, request.query_params.get("code", "")
+        )
+
+    @app.post("/api/v1/auth/identity/mobile/exchange", include_in_schema=False)
+    async def mobile_exchange(data: MobileExchange, request: Request):
+        response = JSONResponse({"signed_in": True}, headers={"cache-control": "no-store"})
+        response.delete_cookie("robot_identity", path="/api/v1/auth/identity")
+        result = await finish_identity(request, response, data.state, data.code)
+        if "location" in result.headers:
+            raise HTTPException(401, "Start Onesa sign-in again")
+        return result
+
+    async def finish_identity(request: Request, response: Response, state_value: str, code: str):
+        if identity_config is None:
+            raise HTTPException(404, "Onesa sign-in is not configured")
+        sim = state(request)
+        flow = sim.identity_flows.get(token_hash(state_value))
         if (
             flow is None
             or flow.expires <= time.time()
@@ -1356,14 +1429,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ):
             response.headers["location"] = "/console?identity=failed"
             return response
+        del sim.identity_flows[token_hash(state_value)]
         access_token: str | None = None
         try:
-            access_token = await asyncio.to_thread(
-                identity.exchange_code,
-                identity_config,
-                request.query_params.get("code", ""),
-                flow.verifier,
-            )
+            if identity_config.audience:
+                from robot_api.managed_oidc import exchange
+
+                access_token = await asyncio.to_thread(
+                    exchange,
+                    identity_config,
+                    code,
+                    flow.verifier,
+                    flow.nonce,
+                )
+            else:
+                access_token = await asyncio.to_thread(
+                    identity.exchange_code,
+                    identity_config,
+                    code,
+                    flow.verifier,
+                )
             principal = await asyncio.to_thread(
                 identity.validate_session, identity_config, access_token
             )

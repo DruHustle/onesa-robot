@@ -802,11 +802,18 @@ export interface components {
         IdentityConfigurationResponse: {
             /** Account Url */
             account_url?: string | null;
+            /** Authorization Endpoint */
+            authorization_endpoint?: string | null;
             /** Enabled */
             enabled: boolean;
         };
         /** IdentityStart */
         IdentityStart: {
+            /**
+             * Mobile
+             * @default false
+             */
+            mobile: boolean;
             /**
              * Step Up
              * @default false

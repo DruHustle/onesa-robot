@@ -616,6 +616,17 @@
             ],
             "title": "Account Url"
           },
+          "authorization_endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Endpoint"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -630,6 +641,11 @@
       "IdentityStart": {
         "additionalProperties": false,
         "properties": {
+          "mobile": {
+            "default": false,
+            "title": "Mobile",
+            "type": "boolean"
+          },
           "step_up": {
             "default": false,
             "title": "Step Up",

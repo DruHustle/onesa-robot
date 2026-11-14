@@ -4,7 +4,7 @@ const client = new RobotClient();
 const byId = id => document.getElementById(id);
 let fastPoll=false,lastIdlePoll=0;
 const localSimulator = ['127.0.0.1','localhost','[::1]'].includes(window.location?.hostname);
-let identityEnabled=false,identitySession=false,identityOrigin='',identityConfirmationExpires=0,canOperate=true;
+let identityEnabled=false,identitySession=false,identityEndpoint='',identityConfirmationExpires=0,canOperate=true;
 let csrf = '', proposalId = '', timer, polling = null, generation=0, observationRevision=0, suspended=false, observationReady=false;
 const busyForms=new WeakSet();
 const observationForms=[['reset-form','reset-submit'],['proposal-form','proposal-submit'],['approval-form','approve-submit'],['mission-form','mission-submit'],['mission-approval','mission-approve-submit']];
@@ -55,7 +55,7 @@ async function startIdentity(stepUp=false){
  if(button)button.disabled=true;
  try{
   const result=await client.beginIdentity(stepUp),target=new URL(result.authorization_url);
-  if(target.origin!==identityOrigin||target.pathname!=='/api/v1/identity/auth')throw new Error('Onesa sign-in could not be verified.');
+  if(target.origin+target.pathname!==identityEndpoint||target.username||target.password||target.hash)throw new Error('Onesa sign-in could not be verified.');
   window.location.assign(target.href);
  }catch(error){notice(error.message);if(button)button.disabled=false;}
 }
@@ -68,7 +68,7 @@ async function configureIdentity(){
   const value=await client.identityConfig();identityEnabled=value.enabled===true;
   if(!identityEnabled&&!localSimulator)notice('Shared sign-in is not connected. Reload to retry or open Company Portal.');
   if(identityEnabled){
-   const account=new URL(value.account_url);identityOrigin=account.origin;button.disabled=false;
+   const account=new URL(value.account_url);identityEndpoint=value.authorization_endpoint||account.origin+'/api/v1/identity/auth';button.disabled=false;
    const link=byId('onesa-account-link');if(link){link.href=account.href;link.hidden=false;}
    byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
    if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
