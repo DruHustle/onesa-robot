@@ -40,6 +40,7 @@ jobs:
       - run: npm test
       - run: npm run prebuild -- --platform ${{ matrix.platform }}
       - name: Build an installable internal Android test APK with its JS bundle
+        id: android_build
         if: matrix.platform == 'android'
         run: |
           export JAVA_HOME="$JAVA_HOME_17_X64"
@@ -66,19 +67,37 @@ jobs:
           sudo chown root:"$(id -gn)" /dev/kvm
           sudo chmod g+rw /dev/kvm
           image='system-images;android-33;google_apis;x86_64'
-          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name native-smoke --package "$image" --device pixel_6 <<< no
-          "$ANDROID_HOME/emulator/emulator" -avd native-smoke -port 5564 -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          trap 'adb -s emulator-5564 emu kill >/dev/null 2>&1 || true' EXIT
-          adb -s emulator-5564 wait-for-device
-          timeout 250 bash -c 'until [[ "$(adb -s emulator-5564 shell getprop sys.boot_completed | tr -d "\r")" == 1 ]]; do sleep 2; done'
+          export ANDROID_USER_HOME="$RUNNER_TEMP/onesa-emulator"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avd="$ANDROID_AVD_HOME/native-smoke.avd"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name native-smoke --path "$avd" --package "$image" --device pixel <<< no
+          if [[ ! -f "$ANDROID_AVD_HOME/native-smoke.ini" ]]; then
+            printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-33\n' "$avd" > "$ANDROID_AVD_HOME/native-smoke.ini"
+          fi
+          "$ANDROID_HOME/emulator/emulator" -avd native-smoke -port 5564 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -cores 2 -memory 3072 -camera-front none -camera-back none > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          deadline=$((SECONDS+300))
+          until [[ "$(timeout 8 adb -s emulator-5564 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]]; do
+            if ! kill -0 "$emulator_pid" 2>/dev/null || (( SECONDS >= deadline )); then
+              tail -45 "$RUNNER_TEMP/emulator.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          [[ "$(adb -s emulator-5564 emu avd name | head -1 | tr -d '\r')" == native-smoke ]]
+          [[ "$(adb -s emulator-5564 shell getprop ro.build.version.sdk | tr -d '\r')" == 33 ]]
+          [[ "$(adb -s emulator-5564 shell getprop ro.product.cpu.abi | tr -d '\r')" == x86_64 ]]
           adb -s emulator-5564 shell input keyevent KEYCODE_WAKEUP
           adb -s emulator-5564 shell wm dismiss-keyguard
-          adb -s emulator-5564 install --no-streaming "$RUNNER_TEMP/native/internal-test.apk"
-          adb -s emulator-5564 shell am start -W -n eu.onesa.robot/.MainActivity
+          timeout 90 adb -s emulator-5564 install --no-streaming "$RUNNER_TEMP/native/internal-test.apk"
+          timeout 45 adb -s emulator-5564 shell am start -W -n eu.onesa.robot/.MainActivity
           for attempt in $(seq 1 24); do
-            adb -s emulator-5564 shell uiautomator dump /sdcard/onesa-screen.xml >/dev/null
-            adb -s emulator-5564 pull /sdcard/onesa-screen.xml "$RUNNER_TEMP/screen.xml" >/dev/null
-            if grep -qi 'sign in with onesa' "$RUNNER_TEMP/screen.xml" && grep -q 'package="eu.onesa.robot"' "$RUNNER_TEMP/screen.xml"; then exit 0; fi
+            if timeout 15 adb -s emulator-5564 shell uiautomator dump /sdcard/onesa-screen.xml >/dev/null &&
+               timeout 10 adb -s emulator-5564 pull /sdcard/onesa-screen.xml "$RUNNER_TEMP/screen.xml" >/dev/null &&
+               grep -qi 'sign in with onesa' "$RUNNER_TEMP/screen.xml" && grep -q 'package="eu.onesa.robot"' "$RUNNER_TEMP/screen.xml"; then exit 0; fi
             sleep 2
           done
           echo 'Installed application did not render its Onesa sign-in action.'
@@ -101,6 +120,7 @@ jobs:
           cd "$RUNNER_TEMP/native"
           shasum -a 256 iphone-simulator.zip > SHA256SUMS
       - name: Retain exact build for device or simulator validation
+        if: ${{ !cancelled() && (success() || steps.android_build.outcome == 'success') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: onesa-robot-${{ matrix.platform }}-${{ github.sha }}
