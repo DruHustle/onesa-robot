@@ -810,6 +810,11 @@ export interface components {
         /** IdentityStart */
         IdentityStart: {
             /**
+             * Mobile
+             * @default false
+             */
+            mobile: boolean;
+            /**
              * Step Up
              * @default false
              */

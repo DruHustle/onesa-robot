@@ -641,6 +641,11 @@
       "IdentityStart": {
         "additionalProperties": false,
         "properties": {
+          "mobile": {
+            "default": false,
+            "title": "Mobile",
+            "type": "boolean"
+          },
           "step_up": {
             "default": false,
             "title": "Step Up",

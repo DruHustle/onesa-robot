@@ -111,7 +111,10 @@ def test_mismatch_or_privilege_denied(signed, changes, profile):
         validate(config, json.dumps(pair(changes, profile)))
 
 
-def test_console_callback_retains_the_legacy_owner_during_outage(tmp_path, monkeypatch, signed):
+@pytest.mark.parametrize("mobile", [False, True])
+def test_console_callback_retains_the_legacy_owner_during_outage(
+    tmp_path, monkeypatch, signed, mobile
+):
     import hashlib
 
     from fastapi.testclient import TestClient
@@ -137,7 +140,7 @@ def test_console_callback_retains_the_legacy_owner_during_outage(tmp_path, monke
     app = create_app(cfg)
     with TestClient(app, base_url=cfg.public_origin) as client:
         client.headers["Origin"] = cfg.public_origin
-        start = client.post("/api/v1/auth/identity/start", json={}).json()
+        start = client.post("/api/v1/auth/identity/start", json={"mobile": mobile}).json()
         params = parse_qs(urlsplit(start["authorization_url"]).query)
 
         def respond(config, path, **kwargs):
@@ -150,7 +153,22 @@ def test_console_callback_retains_the_legacy_owner_during_outage(tmp_path, monke
             params={"state": params["state"][0], "code": "one-use"},
             follow_redirects=False,
         )
-        assert cb.status_code == 303 and cb.headers["location"] == "/console"
+        assert cb.status_code == 303
+        if mobile:
+            returned = urlsplit(cb.headers["location"])
+            assert returned.scheme == "onesarobot" and returned.netloc == "account"
+            assert returned.path == "/callback" and "set-cookie" not in cb.headers
+            data = {key: values[0] for key, values in parse_qs(returned.query).items()}
+            assert data == {"state": params["state"][0], "code": "one-use"}
+            endpoint = "/api/v1/auth/identity/mobile/exchange"
+            device_cookie = client.cookies.get("robot_identity")
+            client.cookies.clear()
+            assert client.post(endpoint, json=data).status_code == 401
+            client.cookies.set("robot_identity", device_cookie)
+            assert client.post(endpoint, json=data).status_code == 200
+            assert client.post(endpoint, json=data).status_code == 401
+        else:
+            assert cb.headers["location"] == "/console"
         expected = (
             "sso:"
             + hashlib.sha256((provider.mapping_issuer + "\x00" + stable).encode()).hexdigest()

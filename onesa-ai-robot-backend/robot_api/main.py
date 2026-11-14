@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -182,6 +182,13 @@ class Confirmation(BaseModel):
 class IdentityStart(BaseModel):
     model_config = ConfigDict(extra="forbid")
     step_up: bool = False
+    mobile: bool = False
+
+
+class MobileExchange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    state: str = Field(pattern=r"^native_[A-Za-z0-9_-]{43}$")
+    code: str = Field(min_length=1, max_length=4096)
 
 
 class IdentityConfigurationResponse(BaseModel):
@@ -1329,6 +1336,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(429, "Sign-in is busy. Please wait before trying again")
         attempts.append(time.monotonic())
         state_value, nonce, verifier = identity.new_transaction()
+        if value.mobile:
+            if value.step_up:
+                raise HTTPException(422, "Start a new mobile sign-in")
+            state_value = "native_" + state_value
         browser = secrets.token_urlsafe(32)
         sim.identity_flows[token_hash(state_value)] = IdentityFlow(
             nonce=nonce,
@@ -1372,7 +1383,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["location"] = "/console?identity=failed"
             return response
         state_value = request.query_params.get("state", "")
-        flow = sim.identity_flows.pop(token_hash(state_value), None)
+        if state_value.startswith("native_"):
+            pending = sim.identity_flows.get(token_hash(state_value))
+            if (
+                not pending
+                or pending.expires <= time.time()
+                or request.query_params.get("iss", identity_config.issuer) != identity_config.issuer
+            ):
+                raise HTTPException(400, "Start sign-in again")
+            params = {"state": state_value}
+            code = request.query_params.get("code", "")
+            if "error" in request.query_params or not code or len(code) > 4096:
+                params["error"] = "cancelled"
+            else:
+                params["code"] = code
+            return RedirectResponse(
+                "onesarobot://account/callback?" + urlencode(params), status_code=303
+            )
+        return await finish_identity(
+            request, response, state_value, request.query_params.get("code", "")
+        )
+
+    @app.post("/api/v1/auth/identity/mobile/exchange", include_in_schema=False)
+    async def mobile_exchange(data: MobileExchange, request: Request):
+        response = JSONResponse({"signed_in": True}, headers={"cache-control": "no-store"})
+        response.delete_cookie("robot_identity", path="/api/v1/auth/identity")
+        result = await finish_identity(request, response, data.state, data.code)
+        if "location" in result.headers:
+            raise HTTPException(401, "Start Onesa sign-in again")
+        return result
+
+    async def finish_identity(request: Request, response: Response, state_value: str, code: str):
+        if identity_config is None:
+            raise HTTPException(404, "Onesa sign-in is not configured")
+        sim = state(request)
+        flow = sim.identity_flows.get(token_hash(state_value))
         if (
             flow is None
             or flow.expires <= time.time()
@@ -1384,6 +1429,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ):
             response.headers["location"] = "/console?identity=failed"
             return response
+        del sim.identity_flows[token_hash(state_value)]
         access_token: str | None = None
         try:
             if identity_config.audience:
@@ -1392,7 +1438,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 access_token = await asyncio.to_thread(
                     exchange,
                     identity_config,
-                    request.query_params.get("code", ""),
+                    code,
                     flow.verifier,
                     flow.nonce,
                 )
@@ -1400,7 +1446,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 access_token = await asyncio.to_thread(
                     identity.exchange_code,
                     identity_config,
-                    request.query_params.get("code", ""),
+                    code,
                     flow.verifier,
                 )
             principal = await asyncio.to_thread(
