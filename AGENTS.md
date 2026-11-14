@@ -28,8 +28,8 @@ setup/status/handoff checklists or first-party SECURITY.md/CONTRIBUTING.md.
 ## Contribution rules
 
 The owner has restored `DruHustle/onesa-robot` as the canonical standalone source.
-Retain Robot's component directories, independent builds and releases, authentication
-and data boundaries, and runtime dependency isolation. Do not create nested Git
+Retain Robot's component directories, independent builds and releases, product
+authorization and data boundaries, and runtime dependency isolation. Do not create nested Git
 repositories or sibling submodules. Run commands from this repository root unless
 a component directory is specified. GitHub executes the existing root workflows.
 Source restoration does not qualify a release adapter or change a deployed
@@ -123,9 +123,12 @@ independent software motion gate. The owner has requested session-bound administ
 allow/block permission for future physical controllers; hardware is still in development.
 Keep that permission separate from controller connection, readiness and actual actuation.
 The owner has authorized one shared Onesa identity and cross-product administrators.
-When explicitly enabled, only the confidential identity service may assign Robot
-viewer/operator/admin access or the MFA-protected global administrator role; bind
-ownership to issuer and subject, never automatically merge accounts by email.
+For the managed pilot, Onesa Identity at `auth.onesa.eu` owns human sign-in and
+product grants, including viewer/operator/admin access and the MFA-protected
+global administrator role. Portal is the legacy issuer during migration. Verify the Robot
+API audience and signed stable Onesa ID. Robot enforces simulation ownership
+and resource permissions. Preserve existing issuer/subject links and never
+merge accounts by email alone.
 Recheck live grants, session, Origin/CSRF and revision on the backend. Shared-identity
 operations require recent central MFA and explicit review confirmation. Legacy mode
 retains the designated existing operator and password confirmation. Identity changes

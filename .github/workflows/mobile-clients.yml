@@ -1,0 +1,129 @@
+name: Native product clients
+on:
+  pull_request:
+    paths:
+      - 'onesa-ai-robot-frontend/mobile/**'
+      - '.github/workflows/mobile-clients.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mobile-clients-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    working-directory: onesa-ai-robot-frontend/mobile
+jobs:
+  native:
+    if: ${{ github.event.repository.private == false || vars.ONESA_PRIVATE_HOSTED_VALIDATION_ENABLED == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: android
+          - os: macos-26
+            platform: ios
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npm run prebuild -- --platform ${{ matrix.platform }}
+      - name: Build an installable internal Android test APK with its JS bundle
+        id: android_build
+        if: matrix.platform == 'android'
+        run: |
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$sdkmanager" 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' 'emulator' 'system-images;android-33;google_apis;x86_64'
+          # The Expo template uses its development signing key for local Release.
+          # It contains the JS bundle and requires no Metro connection.
+          cd android
+          ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --console=plain
+          apk=app/build/outputs/apk/release/app-release.apk
+          unzip -l "$apk" | grep 'assets/index.android.bundle'
+          mkdir -p "$RUNNER_TEMP/native"
+          cp "$apk" "$RUNNER_TEMP/native/internal-test.apk"
+          cd "$RUNNER_TEMP/native"
+          sha256sum internal-test.apk > SHA256SUMS
+      - name: Install and exercise the exact retained APK on Android 13
+        if: matrix.platform == 'android'
+        run: |
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb version
+          test -c /dev/kvm
+          sudo chown root:"$(id -gn)" /dev/kvm
+          sudo chmod g+rw /dev/kvm
+          image='system-images;android-33;google_apis;x86_64'
+          export ANDROID_USER_HOME="$RUNNER_TEMP/onesa-emulator"
+          export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+          export ANDROID_EMULATOR_HOME="$ANDROID_USER_HOME"
+          mkdir -p "$ANDROID_AVD_HOME"
+          avd="$ANDROID_AVD_HOME/native-smoke.avd"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name native-smoke --path "$avd" --package "$image" --device pixel <<< no
+          if [[ ! -f "$ANDROID_AVD_HOME/native-smoke.ini" ]]; then
+            printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-33\n' "$avd" > "$ANDROID_AVD_HOME/native-smoke.ini"
+          fi
+          "$ANDROID_HOME/emulator/emulator" -avd native-smoke -port 5564 -accel on -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -cores 2 -memory 3072 -camera-front none -camera-back none > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          emulator_pid=$!
+          trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT
+          deadline=$((SECONDS+300))
+          until [[ "$(timeout 8 adb -s emulator-5564 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]]; do
+            if ! kill -0 "$emulator_pid" 2>/dev/null || (( SECONDS >= deadline )); then
+              tail -45 "$RUNNER_TEMP/emulator.log"
+              exit 1
+            fi
+            sleep 2
+          done
+          [[ "$(adb -s emulator-5564 emu avd name | head -1 | tr -d '\r')" == native-smoke ]]
+          [[ "$(adb -s emulator-5564 shell getprop ro.build.version.sdk | tr -d '\r')" == 33 ]]
+          [[ "$(adb -s emulator-5564 shell getprop ro.product.cpu.abi | tr -d '\r')" == x86_64 ]]
+          adb -s emulator-5564 shell input keyevent KEYCODE_WAKEUP
+          adb -s emulator-5564 shell wm dismiss-keyguard
+          timeout 90 adb -s emulator-5564 install --no-streaming "$RUNNER_TEMP/native/internal-test.apk"
+          timeout 45 adb -s emulator-5564 shell am start -W -n eu.onesa.robot/.MainActivity
+          for attempt in $(seq 1 24); do
+            if timeout 15 adb -s emulator-5564 shell uiautomator dump /sdcard/onesa-screen.xml >/dev/null &&
+               timeout 10 adb -s emulator-5564 pull /sdcard/onesa-screen.xml "$RUNNER_TEMP/screen.xml" >/dev/null &&
+               grep -qi 'sign in with onesa' "$RUNNER_TEMP/screen.xml" && grep -q 'package="eu.onesa.robot"' "$RUNNER_TEMP/screen.xml"; then exit 0; fi
+            sleep 2
+          done
+          echo 'Installed application did not render its Onesa sign-in action.'
+          exit 1
+      - name: Compile, install and launch on an iPhone simulator
+        if: matrix.platform == 'ios'
+        run: |
+          cd ios && pod install && cd ..
+          workspace=$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)
+          scheme=$(basename "$workspace" .xcworkspace)
+          udid=$(xcrun simctl list devices available -j | python3 -c 'import json,sys;print(next(d["udid"] for runtime,ds in json.load(sys.stdin)["devices"].items() if "iOS" in runtime for d in ds if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$udid" || true
+          xcrun simctl bootstatus "$udid" -b
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Release -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$RUNNER_TEMP/build" CODE_SIGNING_ALLOWED=NO build
+          app=$(find "$RUNNER_TEMP/build/Build/Products/Release-iphonesimulator" -maxdepth 1 -type d -name '*.app' -print -quit)
+          xcrun simctl install "$udid" "$app"
+          xcrun simctl launch "$udid" eu.onesa.robot
+          mkdir -p "$RUNNER_TEMP/native"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/native/iphone-simulator.zip"
+          cd "$RUNNER_TEMP/native"
+          shasum -a 256 iphone-simulator.zip > SHA256SUMS
+      - name: Retain exact build for device or simulator validation
+        if: ${{ !cancelled() && (success() || steps.android_build.outcome == 'success') }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: onesa-robot-${{ matrix.platform }}-${{ github.sha }}
+          path: ${{ runner.temp }}/native/
+          if-no-files-found: error
+          retention-days: 3
