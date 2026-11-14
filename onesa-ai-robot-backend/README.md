@@ -78,3 +78,7 @@ default. See the [inspection architecture](../docs/engineering/SIMULATION_ARCHIT
 Production image builds bind `SOURCE_COMMIT` and `SOURCE_ARCHIVE_SHA256` labels;
 verify the actual running image and qualified artifact independently of Compose
 container labels. An unlabelled local test build is not release evidence.
+
+### Managed human sign-in pilot
+
+Configure the confidential client and exact Robot callback at the managed provider. Use `ONESA_IDENTITY_ISSUER=https://auth.onesa.eu/`, the dedicated `ONESA_IDENTITY_AUDIENCE`, `ONESA_IDENTITY_JWKS` containing trusted current and next public keys, and `ONESA_IDENTITY_ACCOUNT_URL` for the independent account UI. Set `ONESA_IDENTITY_MAPPING_ISSUER` to the previously commissioned Portal issuer to retain the existing simulation owner ID. Never derive this namespace from a request. Deploy a refreshed signing-key set before rotation, and promptly distribute compromised-key removal. The registered client must receive RS256 ID/access tokens and a resource token lifetime at most 300 seconds. The web session checks the signed email profile, nonce, stable ID and local simulation ownership. Fresh MFA remains mandatory for the existing sensitive boundaries. Clearing the managed audience and restoring the legacy issuer reselects the original provider without rewriting task owners. Device and operator recovery credentials retain their existing independent controls.

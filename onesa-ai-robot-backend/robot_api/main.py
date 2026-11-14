@@ -145,6 +145,13 @@ class Settings(BaseSettings):
             raise ValueError("Invalid operator password hash")
         return self
 
+    identity_audience: str = Field(default="", validation_alias="ONESA_IDENTITY_AUDIENCE")
+    identity_public_jwks: str = Field(default="", validation_alias="ONESA_IDENTITY_JWKS")
+    identity_mapping_issuer: str = Field(
+        default="", validation_alias="ONESA_IDENTITY_MAPPING_ISSUER"
+    )
+    identity_account_url: str = Field(default="", validation_alias="ONESA_IDENTITY_ACCOUNT_URL")
+
     def identity_configuration(self) -> identity.IdentityConfig:
         return identity.IdentityConfig(
             issuer=self.identity_issuer,
@@ -152,6 +159,10 @@ class Settings(BaseSettings):
             client_secret=self.identity_client_secret.get_secret_value(),
             redirect_uri=self.identity_callback_url,
             product="robot",
+            audience=self.identity_audience,
+            public_jwks=self.identity_public_jwks,
+            mapping_issuer=self.identity_mapping_issuer,
+            account_url=self.identity_account_url,
             allow_local_http=self.deployment_environment == "local",
         )
 
@@ -174,6 +185,7 @@ class IdentityStart(BaseModel):
 
 
 class IdentityConfigurationResponse(BaseModel):
+    authorization_endpoint: str | None = None
     enabled: bool
     account_url: str | None = None
 
@@ -184,6 +196,7 @@ class IdentityStartResponse(BaseModel):
 
 @dataclass(frozen=True)
 class IdentityFlow:
+    nonce: str
     browser_hash: str
     verifier: str = field(repr=False)
     expires: float
@@ -1009,7 +1022,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def identity_owner(principal: identity.Identity) -> str:
         # Email is a display/contact attribute, never an account-linking key.
-        value = principal.issuer + "\x00" + principal.subject
+        namespace = (identity_config.mapping_issuer if identity_config else "") or principal.issuer
+        value = namespace + "\x00" + principal.subject
         return "sso:" + hashlib.sha256(value.encode()).hexdigest()
 
     def identity_role(
@@ -1260,12 +1274,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "deployment_environment": config.deployment_environment,
         }
 
-    @app.get("/api/v1/auth/identity/config", response_model=IdentityConfigurationResponse)
+    @app.get(
+        "/api/v1/auth/identity/config",
+        response_model=IdentityConfigurationResponse,
+        response_model_exclude_unset=True,
+    )
     async def identity_configuration():
         issuer = urlsplit(identity_config.issuer) if identity_config else None
         return {
             "enabled": identity_config is not None,
-            "account_url": f"{issuer.scheme}://{issuer.netloc}/account" if issuer else None,
+            **(
+                {"authorization_endpoint": identity_config.issuer + "authorize"}
+                if identity_config and identity_config.audience
+                else {}
+            ),
+            "account_url": (
+                identity_config.account_url or f"{issuer.scheme}://{issuer.netloc}/account"
+            )
+            if issuer and identity_config
+            else None,
         }
 
     @app.post("/api/v1/auth/identity/start", response_model=IdentityStartResponse)
@@ -1304,6 +1331,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         state_value, nonce, verifier = identity.new_transaction()
         browser = secrets.token_urlsafe(32)
         sim.identity_flows[token_hash(state_value)] = IdentityFlow(
+            nonce=nonce,
             browser_hash=token_hash(browser),
             verifier=verifier,
             expires=now + 600,
@@ -1358,12 +1386,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return response
         access_token: str | None = None
         try:
-            access_token = await asyncio.to_thread(
-                identity.exchange_code,
-                identity_config,
-                request.query_params.get("code", ""),
-                flow.verifier,
-            )
+            if identity_config.audience:
+                from robot_api.managed_oidc import exchange
+
+                access_token = await asyncio.to_thread(
+                    exchange,
+                    identity_config,
+                    request.query_params.get("code", ""),
+                    flow.verifier,
+                    flow.nonce,
+                )
+            else:
+                access_token = await asyncio.to_thread(
+                    identity.exchange_code,
+                    identity_config,
+                    request.query_params.get("code", ""),
+                    flow.verifier,
+                )
             principal = await asyncio.to_thread(
                 identity.validate_session, identity_config, access_token
             )

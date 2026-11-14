@@ -802,6 +802,8 @@ export interface components {
         IdentityConfigurationResponse: {
             /** Account Url */
             account_url?: string | null;
+            /** Authorization Endpoint */
+            authorization_endpoint?: string | null;
             /** Enabled */
             enabled: boolean;
         };

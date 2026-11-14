@@ -616,6 +616,17 @@
             ],
             "title": "Account Url"
           },
+          "authorization_endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Endpoint"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
