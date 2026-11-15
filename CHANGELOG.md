@@ -4,7 +4,7 @@
 
 ## Unreleased
 
-- Make the native Robot API origin an explicit build-time Expo setting. Staging bundles can target an isolated HTTPS `*.onesa.eu` origin instead of silently calling production; malformed, insecure, path-bearing and off-domain overrides fail closed. The production origin remains the default for production builds. Regression coverage checks accepted staging origins and rejected unsafe overrides.
+- Make the native Robot API origin an explicit build-time Expo setting. Staging bundles can target the exact approved HTTPS Render staging API origin instead of silently calling production; only the production and staging service origins are allowlisted, and malformed, insecure, path-bearing and off-origin overrides fail closed. The production origin remains the default for production builds. Regression coverage checks accepted staging origins and rejected unsafe overrides.
 
 
 - Preserve precise terminal integrity classification when the safety tick retires
