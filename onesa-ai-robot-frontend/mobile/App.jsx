@@ -93,7 +93,7 @@ export default function App() {
       throw Error('Confirm this operation with your Onesa account.');
     }
     if (Number(account.confirmation_expires_at) > Date.now()/1000) return csrf;
-    await signIn(Browser.openAuthSessionAsync, call, {stepUp:true});
+    await signIn(Browser.openAuthSessionAsync, call, {stepUp:true, csrf});
     const user = await call('/auth/me');
     if (user.authentication_method !== 'onesa' ||
         !Number.isFinite(user.confirmation_expires_at) ||
