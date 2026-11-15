@@ -4,9 +4,12 @@ test('native API origin defaults to the production Robot origin', () => {
   assert.equal(ORIGIN, resolveApiOrigin(process.env.EXPO_PUBLIC_ROBOT_API_ORIGIN));
 });
 
-test('native API origin supports isolated HTTPS Onesa staging hosts', () => {
-  assert.equal(resolveApiOrigin('https://robot-staging.onesa.eu'), 'https://robot-staging.onesa.eu');
-  assert.equal(resolveApiOrigin('https://robot-preview.onesa.eu/'), 'https://robot-preview.onesa.eu');
+test('native API origin supports the exact production and staging services', () => {
+  assert.equal(resolveApiOrigin('https://robot.onesa.eu/'), 'https://robot.onesa.eu');
+  assert.equal(
+    resolveApiOrigin('https://onesa-ai-robot-backend-staging.onrender.com'),
+    'https://onesa-ai-robot-backend-staging.onrender.com',
+  );
 });
 
 test('native API origin rejects insecure, path-bearing and off-domain overrides', () => {
