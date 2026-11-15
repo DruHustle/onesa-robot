@@ -771,9 +771,7 @@ class State:
             return
         now = time.time()
         changed = False
-        rows = self.db.execute(
-            "SELECT id,proposal FROM tasks WHERE state='proposed'"
-        ).fetchall()
+        rows = self.db.execute("SELECT id,proposal FROM tasks WHERE state='proposed'").fetchall()
         for row in rows:
             try:
                 proposal = Proposal.model_validate_json(row["proposal"])
@@ -791,15 +789,12 @@ class State:
                 # Keep the original proposal bytes for diagnosis; malformed
                 # evidence is terminal and can never be approved or replayed.
                 reason = "proposal_integrity"
-            current = self.db.execute(
-                "SELECT state FROM tasks WHERE id=?", (row["id"],)
-            ).fetchone()
+            current = self.db.execute("SELECT state FROM tasks WHERE id=?", (row["id"],)).fetchone()
             if current is None:
                 continue
             if current["state"] == "proposed":
                 updated = self.db.execute(
-                    "UPDATE tasks SET state='cancelled',reason=? "
-                    "WHERE id=? AND state='proposed'",
+                    "UPDATE tasks SET state='cancelled',reason=? WHERE id=? AND state='proposed'",
                     (reason, row["id"]),
                 )
                 if updated.rowcount:

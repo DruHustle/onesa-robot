@@ -498,9 +498,7 @@ def test_expired_and_malformed_unapproved_proposals_are_terminal(api):
     sim = api.app.state.sim
 
     def expire():
-        row = sim.db.execute(
-            "SELECT proposal FROM tasks WHERE id=?", (task_id,)
-        ).fetchone()
+        row = sim.db.execute("SELECT proposal FROM tasks WHERE id=?", (task_id,)).fetchone()
         stale = Proposal.model_validate_json(row["proposal"]).model_copy(
             update={"issued_at": time.time() - 16}
         )
@@ -514,21 +512,14 @@ def test_expired_and_malformed_unapproved_proposals_are_terminal(api):
     history = api.get("/api/v1/tasks").json()["tasks"]
     expired = next(task for task in history if task["id"] == task_id)
     assert (expired["state"], expired["reason"]) == ("cancelled", "proposal_expired")
-    assert (
-        api.post(
-            f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD}
-        ).status_code
-        == 409
-    )
+    assert api.post(f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD}).status_code == 409
 
     corrupt = api.post("/api/v1/tasks", json=proposal())
     assert corrupt.status_code == 201, corrupt.text
     corrupt_id = corrupt.json()["id"]
 
     def corrupt_proposal():
-        sim.db.execute(
-            "UPDATE tasks SET proposal=? WHERE id=?", ("{malformed", corrupt_id)
-        )
+        sim.db.execute("UPDATE tasks SET proposal=? WHERE id=?", ("{malformed", corrupt_id))
         sim.db.commit()
 
     api.portal.call(corrupt_proposal)
@@ -536,8 +527,8 @@ def test_expired_and_malformed_unapproved_proposals_are_terminal(api):
     terminal = next(task for task in history if task["id"] == corrupt_id)
     assert (terminal["state"], terminal["reason"]) == ("cancelled", "proposal_integrity")
     raw = api.portal.call(
-        lambda: sim.db.execute(
-            "SELECT proposal FROM tasks WHERE id=?", (corrupt_id,)
-        ).fetchone()["proposal"]
+        lambda: sim.db.execute("SELECT proposal FROM tasks WHERE id=?", (corrupt_id,)).fetchone()[
+            "proposal"
+        ]
     )
     assert raw == "{malformed"

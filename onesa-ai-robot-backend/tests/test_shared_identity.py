@@ -588,9 +588,7 @@ def test_expired_proposal_does_not_block_identity_step_up(environment):
     sim = app.state.sim
 
     def expire():
-        row = sim.db.execute(
-            "SELECT proposal FROM tasks WHERE id=?", (task_id,)
-        ).fetchone()
+        row = sim.db.execute("SELECT proposal FROM tasks WHERE id=?", (task_id,)).fetchone()
         stale = Proposal.model_validate_json(row["proposal"]).model_copy(
             update={"issued_at": time.time() - 16}
         )
