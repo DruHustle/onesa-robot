@@ -56,10 +56,14 @@ export async function stopSimulation(csrf, api = call) {
   return status;
 }
 
-export async function signIn(openBrowser, api = call, {stepUp = false} = {}) {
+export async function signIn(openBrowser, api = call, {stepUp = false, csrf} = {}) {
+  if (stepUp && (typeof csrf !== 'string' || !csrf)) {
+    throw Error('Refresh your operator session before confirming with MFA.');
+  }
   const start = await api(AUTH + '/start', {
     method:'POST',
-    body:{mobile:true, step_up:stepUp}
+    body:{mobile:true, step_up:stepUp},
+    ...(stepUp ? {csrf} : {})
   });
   const url = new URL(start.authorize_url || start.authorization_url);
   const state = url.searchParams.get('state');
