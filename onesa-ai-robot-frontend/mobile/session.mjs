@@ -14,7 +14,7 @@ export function resolveApiOrigin(value) {
       (url.pathname !== '' && url.pathname !== '/') || url.search || url.hash ||
       (host !== 'onesa.eu' && !host.endsWith('.onesa.eu')) ||
       (url.port && url.port !== '443')) {
-    throw new Error('Robot API origin must be a bare HTTPS origin under onesa.eu.');
+    throw new Error('Robot API origin must be an HTTPS Onesa origin without credentials, path, query, fragment or nonstandard port.');
   }
   return url.origin;
 }
