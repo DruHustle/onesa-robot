@@ -22,6 +22,25 @@ export async function call(path, {method = 'GET', body, csrf} = {}) {
   return response.status === 204 ? null : response.json();
 }
 
+
+/**
+ * Stop is independent of ordinary operator mutations and their loading lock.
+ * An acknowledged POST alone is insufficient: read back the simulator latch,
+ * active-task state and physical-actuation flag before presenting a safe result.
+ */
+export async function stopSimulation(csrf, api = call) {
+  if (!csrf || typeof csrf !== 'string') throw Error('Sign in before requesting Stop.');
+  const reply = await api('/stop', {method:'POST', csrf});
+  if (reply?.status !== 'stopped' || reply.physical_actuation !== false) {
+    throw Error('Simulator Stop was not acknowledged.');
+  }
+  const status = await api('/status');
+  if (status?.stopped !== true || status.active_task !== null || status.physical_actuation !== false) {
+    throw Error('Simulator Stop state could not be verified.');
+  }
+  return status;
+}
+
 export async function signIn(openBrowser, api = call) {
   const start = await api(AUTH + '/start', {method:'POST', body:{mobile:true}});
   const url = new URL(start.authorize_url || start.authorization_url);
