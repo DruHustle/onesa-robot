@@ -660,23 +660,34 @@ class State:
             return
         if not isinstance(payload, dict) or payload.get("inspection") is None:
             return
-        proposal = Proposal.model_validate_json(row["proposal"])
-        record = proposal.inspection
-        if record is None:
-            return
-        active = getattr(self, "active", None)
-        elapsed = record.elapsed_seconds
-        if active is not None and active["id"] == row["id"]:
-            # Prefer the last in-memory observation; a journal failure must not
-            # erase already collected evidence or pretend an execution completed.
-            proposal = active["proposal"]
+        try:
+            proposal = Proposal.model_validate_json(row["proposal"])
             record = proposal.inspection
             if record is None:
-                raise SafetyViolation("Active inspection lost its approved plan")
-            elapsed = max(0.0, time.monotonic() - active["started"])
-        updated = inspection.interrupt(record, reason, time.time(), elapsed)
-        if updated != record:
-            self.save_inspection(row["id"], proposal, updated)
+                return
+            active = getattr(self, "active", None)
+            elapsed = record.elapsed_seconds
+            if active is not None and active["id"] == row["id"]:
+                # Prefer the last in-memory observation; a journal failure must not
+                # erase already collected evidence or pretend an execution completed.
+                proposal = active["proposal"]
+                record = proposal.inspection
+                if record is None:
+                    raise SafetyViolation("Active inspection lost its approved plan")
+                elapsed = max(0.0, time.monotonic() - active["started"])
+            updated = inspection.interrupt(record, reason, time.time(), elapsed)
+            if updated != record:
+                self.save_inspection(row["id"], proposal, updated)
+        except (ValueError, TypeError):
+            # Invalid saved inspection evidence must never prevent Stop, logout,
+            # watchdog failure handling or process-restart cancellation. Keep the
+            # original proposal bytes for diagnosis; do not manufacture a report.
+            self.db.execute(
+                "UPDATE tasks SET state='cancelled',reason='inspection_integrity' "
+                "WHERE id=? AND state IN ('running','proposed')",
+                (row["id"],),
+            )
+            self.dirty(row["id"])
 
     def interrupt_inspections(self, reason: str) -> None:
         for row in self.db.execute("SELECT * FROM tasks WHERE state IN ('running','proposed')"):
