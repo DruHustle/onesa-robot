@@ -14,7 +14,9 @@ native Stop bypasses the ordinary mutation lock and sends a fresh POST to the
 same-origin Robot API using the current CSRF token. It does **not** retry an
 uncertain request or replay pending tasks. After acknowledgement it verifies
 `stopped=true`, `active_task=null` and `physical_actuation=false` using
-the authenticated status endpoint. An unavailable or contradictory readback
+the authenticated status endpoint, then requires the separate 33-axis humanoid
+observation to confirm `stopped=true`, no active command, no pending proposal
+and `physical_actuation=false`. An unavailable or contradictory readback
 is shown as **unverified**, never as a completed Stop. The watchdog still
 independently cancels unsupervised tasks.
 
