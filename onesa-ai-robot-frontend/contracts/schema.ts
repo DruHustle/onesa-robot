@@ -3338,6 +3338,15 @@ export interface operations {
                     "application/json": components["schemas"]["ActionResponse"];
                 };
             };
+            /** @description The task has already completed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceError"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {

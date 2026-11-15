@@ -2071,7 +2071,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
 
-    @app.post("/api/v1/tasks/{task_id}/cancel", response_model=ActionResponse)
+    @app.post(
+        "/api/v1/tasks/{task_id}/cancel",
+        response_model=ActionResponse,
+        responses={409: {"model": ServiceError, "description": "The task has already completed."}},
+    )
     async def cancel(task_id: str, request: Request, operator: Operator):
         sim = state(request)
         row = sim.db.execute(
@@ -2079,6 +2083,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ).fetchone()
         if row is None:
             raise HTTPException(404, "Task not found")
+        if row["state"] == "completed":
+            raise HTTPException(409, "The task has already completed")
         if row["state"] == "running" or (sim.active and sim.active["id"] == task_id):
             sim.cancel("operator_cancel", stop=True)
         elif row["state"] == "proposed":

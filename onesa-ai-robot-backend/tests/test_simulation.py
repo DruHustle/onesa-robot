@@ -121,7 +121,10 @@ def test_completion_requires_heartbeat_no_replay_and_explicit_stop_reset(api):
     assert status["mode"] == "simulation"
     assert status["physical_actuation"] is False
     assert status["position_radians"] == pytest.approx(0.1)
-    assert api.get("/api/v1/tasks").json()["tasks"][0]["state"] == "completed"
+    completed = api.get("/api/v1/tasks").json()["tasks"][0]
+    assert completed["state"] == "completed"
+    assert api.post(f"/api/v1/tasks/{task_id}/cancel").status_code == 409
+    assert api.get("/api/v1/tasks").json()["tasks"][0] == completed
     approve(api, proposal(target_radians=0.2))
     assert api.post("/api/v1/stop").status_code == 200
     assert api.get("/api/v1/status").json()["stopped"]
@@ -176,6 +179,7 @@ def test_session_revocation_cancel_restart_and_expiry(config):
         reset(first)
         task_id = approve(first, proposal(duration_seconds=5))
         assert first.post(f"/api/v1/tasks/{task_id}/cancel").status_code == 200
+        assert first.post(f"/api/v1/tasks/{task_id}/cancel").json()["status"] == "cancelled"
         reset(first)
         approve(first, proposal(duration_seconds=5))
         assert first.post("/api/v1/auth/logout").status_code == 200
