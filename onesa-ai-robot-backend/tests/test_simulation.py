@@ -512,7 +512,8 @@ def test_expired_and_malformed_unapproved_proposals_are_terminal(api):
     history = api.get("/api/v1/tasks").json()["tasks"]
     expired = next(task for task in history if task["id"] == task_id)
     assert (expired["state"], expired["reason"]) == ("cancelled", "proposal_expired")
-    assert api.post(f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD}).status_code == 409
+    approval = api.post(f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD})
+    assert approval.status_code == 409
 
     corrupt = api.post("/api/v1/tasks", json=proposal())
     assert corrupt.status_code == 201, corrupt.text
