@@ -36,7 +36,7 @@ test('native API origin rejects insecure, path-bearing and off-domain overrides'
 
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {signIn, CALLBACK, AUTH, stopSimulation, resolveApiOrigin, ORIGIN} from './session.mjs';
+import {signIn, CALLBACK, AUTH, stopSimulation, resetSimulation, resolveApiOrigin, ORIGIN} from './session.mjs';
 const state = 'native_' + 'A'.repeat(43);
 const url = 'https://auth.onesa.eu/authorize?state=' + state + '&code_challenge_method=S256';
 for (const [scenario, value] of Object.entries({correct:CALLBACK+'?state='+state+'&code=fixture', stale:CALLBACK+'?state=wrong&code=fixture', foreign:'wrong://account/callback?state='+state+'&code=fixture', duplicate:CALLBACK+'?state='+state+'&code=fixture&code=other', cancelled:CALLBACK+'?state='+state+'&error=cancelled'})) {
@@ -147,6 +147,71 @@ test('Stop fails closed if the backend does not acknowledge the safety state', a
     assert.equal(seen[0], '/stop');
   }
   await assert.rejects(stopSimulation('', () => {throw Error('Should not reach API');}), /Sign in/);
+});
+
+test('reset verifies acknowledgement, legacy history and independent humanoid state', async () => {
+  const seen = [];
+  const api = async (path, options = {}) => {
+    seen.push({path, options});
+    if (path === '/reset') return {status:'reset', physical_actuation:false};
+    if (path === '/status') return {mode:'simulation', stopped:false, active_task:null, physical_actuation:false};
+    if (path === '/tasks') return {tasks:[{state:'completed'},{state:'cancelled'}]};
+    if (path === '/humanoid/state') return {
+      connection:'simulated_actuators', stopped:false, active_command:null,
+      pending:null, physical_actuation:false
+    };
+    throw Error('Unexpected endpoint');
+  };
+  const status = await resetSimulation('synthetic-csrf', api);
+  assert.equal(status.stopped, false);
+  assert.deepEqual(seen.map(item=>item.path), ['/reset','/status','/tasks','/humanoid/state']);
+  assert.deepEqual(seen[0].options, {
+    method:'POST', csrf:'synthetic-csrf', body:{confirmed:true}
+  });
+});
+
+test('reset fails closed on an unverified acknowledgement or any active/faulted view', async () => {
+  const ack = {status:'reset', physical_actuation:false};
+  const status = {mode:'simulation', stopped:false, active_task:null, physical_actuation:false};
+  const history = {tasks:[{state:'completed'},{state:'cancelled'}]};
+  const humanoid = {
+    connection:'simulated_actuators', stopped:false, active_command:null,
+    pending:null, physical_actuation:false
+  };
+  const cases = [
+    ['missing acknowledgement', {}, status, history, humanoid, 1],
+    ['physical actuation uncertain', {status:'reset'}, status, history, humanoid, 1],
+    ['wrong mode', ack, {...status,mode:'live'}, history, humanoid, 2],
+    ['stop latch remains set', ack, {...status,stopped:true}, history, humanoid, 2],
+    ['legacy task still active', ack, {...status,active_task:'running'}, history, humanoid, 2],
+    ['physical flag enabled', ack, {...status,physical_actuation:true}, history, humanoid, 2],
+    ['history still proposed', ack, status, {tasks:[{state:'proposed'}]}, humanoid, 3],
+    ['history still running', ack, status, {tasks:[{state:'running'}]}, humanoid, 3],
+    ['humanoid command active', ack, status, history, {...humanoid,active_command:'running'}, 4],
+    ['humanoid proposal pending', ack, status, history, {...humanoid,pending:{id:'pending'}}, 4],
+    ['humanoid faulted', ack, status, history, {...humanoid,connection:'simulator_fault'}, 4],
+    ['humanoid stop latch remains set', ack, status, history, {...humanoid,stopped:true}, 4],
+    ['humanoid physical state uncertain', ack, status, history, {...humanoid,physical_actuation:undefined}, 4],
+  ];
+  for (const [label, reply, current, tasks, whole, count] of cases) {
+    const seen = [];
+    const api = async path => {
+      seen.push(path);
+      if (path === '/reset') return reply;
+      if (path === '/status') return current;
+      if (path === '/tasks') return tasks;
+      if (path === '/humanoid/state') return whole;
+      throw Error('Unexpected endpoint');
+    };
+    await assert.rejects(resetSimulation('synthetic-csrf', api), undefined, label);
+    assert.equal(seen.length, count, label);
+  }
+  let called = false;
+  await assert.rejects(
+    resetSimulation('', async () => { called = true; }),
+    /Sign in before resetting/
+  );
+  assert.equal(called, false);
 });
 
 test('native MFA step-up refuses to start without the current session CSRF proof', async () => {

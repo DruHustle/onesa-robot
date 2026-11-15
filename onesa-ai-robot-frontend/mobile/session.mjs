@@ -79,6 +79,35 @@ export async function stopSimulation(csrf, api = call) {
   return status;
 }
 
+/**
+ * Reset only clears the software Stop latch. Verify every independent software
+ * view before telling the operator that the simulator is ready again.
+ */
+export async function resetSimulation(csrf, api = call) {
+  if (!csrf || typeof csrf !== 'string') throw Error('Sign in before resetting the simulator.');
+  const reply = await api('/reset', {method:'POST', csrf, body:{confirmed:true}});
+  if (reply?.status !== 'reset' || reply.physical_actuation !== false) {
+    throw Error('Simulator reset was not acknowledged.');
+  }
+  const status = await api('/status');
+  if (status?.mode !== 'simulation' || status.stopped !== false ||
+      status.active_task !== null || status.physical_actuation !== false) {
+    throw Error('Simulator reset state could not be verified.');
+  }
+  const history = await api('/tasks');
+  if (!Array.isArray(history?.tasks) ||
+      !history.tasks.every(task => ['completed', 'cancelled'].includes(task?.state))) {
+    throw Error('Simulator task history could not verify reset.');
+  }
+  const humanoid = await api('/humanoid/state');
+  if (humanoid?.connection !== 'simulated_actuators' || humanoid.stopped !== false ||
+      humanoid.active_command !== null || humanoid.pending !== null ||
+      humanoid.physical_actuation !== false) {
+    throw Error('Humanoid reset state could not be verified.');
+  }
+  return status;
+}
+
 export async function signIn(openBrowser, api = call, {stepUp = false, csrf} = {}) {
   if (stepUp && (typeof csrf !== 'string' || !csrf)) {
     throw Error('Refresh your operator session before confirming with MFA.');

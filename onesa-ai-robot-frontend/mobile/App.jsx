@@ -4,7 +4,7 @@ import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import * as Browser from 'expo-web-browser';
 import * as SecureStore from 'expo-secure-store';
 import {randomUUID} from 'expo-crypto';
-import {call, signIn, stopSimulation} from './session.mjs';
+import {call, signIn, stopSimulation, resetSimulation} from './session.mjs';
 
 export default function App() {
   const [account, setAccount] = useState(null);
@@ -113,14 +113,7 @@ export default function App() {
   }
   async function reset() {
     const currentCsrf = await requireMfa();
-    const response = await call('/reset',{method:'POST',csrf:currentCsrf,body:{confirmed:true}});
-    if (response?.status !== 'reset' || response.physical_actuation !== false) {
-      throw Error('Simulator reset could not be acknowledged.');
-    }
-    const status = await call('/status');
-    if (status.stopped !== false || status.physical_actuation !== false) {
-      throw Error('Simulator reset could not be verified.');
-    }
+    await resetSimulation(currentCsrf);
     await refresh();
   }
 

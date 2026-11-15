@@ -19,7 +19,7 @@ uncertain request or replay pending tasks. After acknowledgement it verifies
 the authenticated status endpoint, then requires the separate 33-axis humanoid
 observation to confirm `stopped=true`, no active command, no pending proposal,
 `physical_actuation=false` and a healthy `simulated_actuators` connection. A
-`simulator_fault` response is never reported as a verified Stop. An unavailable
+`simulator_fault` response is never reported as a verified Stop. Reset also verifies simulation mode, an empty active-task state, terminal task history and an idle, healthy humanoid view with physical actuation explicitly false before reporting readiness. An unavailable
 or contradictory readback
 is shown as **unverified**, never as a completed Stop. The watchdog still
 independently cancels unsupervised tasks.
