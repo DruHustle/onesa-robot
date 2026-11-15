@@ -35,7 +35,7 @@ export async function stopSimulation(csrf, api = call) {
     throw Error('Simulator Stop was not acknowledged.');
   }
   const status = await api('/status');
-  if (status?.stopped !== true || status.active_task !== null || status.physical_actuation !== false) {
+  if (status?.mode !== 'simulation' || status.stopped !== true || status.active_task !== null || status.physical_actuation !== false) {
     throw Error('Simulator Stop state could not be verified.');
   }
   // The status latch and the durable task journal are separate observations.
