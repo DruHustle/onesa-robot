@@ -249,9 +249,7 @@ def test_corrupt_inspection_record_cannot_prevent_operator_stop(api, phase):
         "inspection_integrity",
     )
     assert (
-        api.post(
-            f"/api/v1/tasks/{detail['id']}/approve", json={"password": PASSWORD}
-        ).status_code
+        api.post(f"/api/v1/tasks/{detail['id']}/approve", json={"password": PASSWORD}).status_code
         == 409
     )
 
