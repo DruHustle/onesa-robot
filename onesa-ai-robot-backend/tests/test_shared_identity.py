@@ -105,9 +105,7 @@ def environment(tmp_path, monkeypatch):
 
 
 def start(client, *, step_up=False, mobile=False):
-    result = client.post(
-        "/api/v1/auth/identity/start", json={"step_up": step_up, "mobile": mobile}
-    )
+    result = client.post("/api/v1/auth/identity/start", json={"step_up": step_up, "mobile": mobile})
     assert result.status_code == 200, result.text
     authorization = result.json()["authorization_url"]
     assert "synthetic-client-secret" not in authorization

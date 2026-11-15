@@ -49,7 +49,7 @@ test('Stop can complete before an unrelated operator mutation and verifies the a
     seen.push({path, options});
     if (path === '/tasks' && options.method === 'POST') return stuckMutation;
     if (path === '/stop') return {status:'stopped', physical_actuation:false};
-    if (path === '/status') return {stopped:true, active_task:null, physical_actuation:false};
+    if (path === '/status') return {mode:'simulation', stopped:true, active_task:null, physical_actuation:false};
     if (path === '/tasks') return {tasks:[{state:'cancelled'}]};
     if (path === '/humanoid/state') return {connection:'simulated_actuators', stopped:true, active_command:null, pending:null, physical_actuation:false};
     throw Error('Unexpected endpoint');
@@ -74,6 +74,7 @@ test('Stop fails closed if the backend does not acknowledge the safety state', a
     ['still active', safe, {stopped:true, active_task:'running', physical_actuation:false}, undefined, undefined, 2],
     ['latch not set', safe, {stopped:false, active_task:null, physical_actuation:false}, undefined, undefined, 2],
     ['unexpected operating mode', safe, {...idle, mode:'live'}, undefined, undefined, 2],
+    ['missing operating mode', safe, {stopped:true, active_task:null, physical_actuation:false}, undefined, undefined, 2],
     ['physical flag uncertain', safe, {stopped:true, active_task:null}, undefined, undefined, 2],
     ['status readback unavailable', safe, new Error('offline'), undefined, undefined, 2],
     ['history still contains a running task', safe, idle, {tasks:[{state:'running'}]}, undefined, 3],
