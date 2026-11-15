@@ -9,12 +9,14 @@ export function resolveApiOrigin(value) {
   let url;
   try { url = new URL(value); }
   catch { throw new Error('Robot API origin must be an HTTPS Onesa origin.'); }
-  const host = url.hostname.toLowerCase();
+  const allowedOrigins = new Set([
+    PRODUCTION_API_ORIGIN,
+    'https://onesa-ai-robot-backend-staging.onrender.com',
+  ]);
   if (url.protocol !== 'https:' || url.username || url.password ||
       (url.pathname !== '' && url.pathname !== '/') || url.search || url.hash ||
-      (host !== 'onesa.eu' && !host.endsWith('.onesa.eu')) ||
-      (url.port && url.port !== '443')) {
-    throw new Error('Robot API origin must be an HTTPS Onesa origin without credentials, path, query, fragment or nonstandard port.');
+      url.port || !allowedOrigins.has(url.origin)) {
+    throw new Error('Robot API origin must be an approved HTTPS Onesa origin without credentials, path, query or fragment.');
   }
   return url.origin;
 }
