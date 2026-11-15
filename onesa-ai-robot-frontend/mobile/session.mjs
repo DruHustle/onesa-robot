@@ -38,6 +38,14 @@ export async function stopSimulation(csrf, api = call) {
   if (status?.stopped !== true || status.active_task !== null || status.physical_actuation !== false) {
     throw Error('Simulator Stop state could not be verified.');
   }
+  // The status latch and the durable task journal are separate observations.
+  // Do not tell the operator that Stop is verified while history still exposes
+  // a proposed/running task or when the journal cannot be read.
+  const history = await api('/tasks');
+  if (!Array.isArray(history?.tasks) ||
+      !history.tasks.every(task => ['completed', 'cancelled'].includes(task?.state))) {
+    throw Error('Simulator task history could not verify Stop.');
+  }
   // The legacy joint and 33-axis humanoid simulators have independent task
   // registries. A green legacy latch alone does not establish whole-body idle.
   const humanoid = await api('/humanoid/state');
