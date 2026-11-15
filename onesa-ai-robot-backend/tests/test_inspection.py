@@ -214,6 +214,50 @@ def test_cancel_stop_timeout_and_persistence_survive_application_restart(api, co
         assert second.get("/api/v1/status").json()["stopped"] is True
 
 
+@pytest.mark.parametrize("phase", ["proposed", "running"])
+def test_corrupt_inspection_record_cannot_prevent_operator_stop(api, phase):
+    detail = plan(api)
+    if phase == "running":
+        approve(api, detail)
+    # A valid JSON object with malformed inspection content bypasses the legacy
+    # JSON-decode guard. Stop must remain usable and preserve the bad source bytes.
+    corrupt = '{"inspection":{"invalid":"synthetic-test-only"}}'
+
+    def corrupt_journal():
+        sim = api.app.state.sim
+        sim.db.execute(
+            "UPDATE tasks SET proposal=? WHERE id=?", (corrupt, detail["id"])
+        )
+        sim.db.commit()
+
+    api.portal.call(corrupt_journal)
+    response = api.post("/api/v1/stop")
+    assert response.status_code == 200, response.text
+    status = api.get("/api/v1/status").json()
+    assert status["stopped"] and status["active_task"] is None
+    assert status["physical_actuation"] is False
+
+    def stored_record():
+        sim = api.app.state.sim
+        return tuple(
+            sim.db.execute(
+                "SELECT proposal,state,reason FROM tasks WHERE id=?", (detail["id"],)
+            ).fetchone()
+        )
+
+    assert api.portal.call(stored_record) == (
+        corrupt,
+        "cancelled",
+        "inspection_integrity",
+    )
+    assert (
+        api.post(
+            f"/api/v1/tasks/{detail['id']}/approve", json={"password": PASSWORD}
+        ).status_code
+        == 409
+    )
+
+
 def test_foreign_owner_aggregate_detail_and_export_are_denied(api):
     detail = plan(api)
 
