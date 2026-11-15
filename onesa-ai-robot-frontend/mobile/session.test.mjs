@@ -4,6 +4,12 @@ test('native API origin defaults to the production Robot origin', () => {
   assert.equal(ORIGIN, resolveApiOrigin(process.env.EXPO_PUBLIC_ROBOT_API_ORIGIN));
 });
 
+test('CI native release candidates are pinned to the approved staging API', {skip: process.env.CI !== '1'}, () => {
+  const staging = 'https://onesa-ai-robot-backend-staging.onrender.com';
+  assert.equal(process.env.EXPO_PUBLIC_ROBOT_API_ORIGIN, staging);
+  assert.equal(ORIGIN, staging);
+});
+
 test('native API origin supports the exact production and staging services', () => {
   assert.equal(resolveApiOrigin('https://robot.onesa.eu/'), 'https://robot.onesa.eu');
   assert.equal(
