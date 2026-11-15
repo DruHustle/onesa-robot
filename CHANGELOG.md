@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+- Expire abandoned legacy-joint and inspection proposals in the safety tick.
+  Stale timestamps become terminal cancelled history; malformed proposal bytes
+  are preserved with a terminal integrity reason. Cleanup is deferred while the
+  remote journal is failed. Regression coverage proves expired proposals no
+  longer block MFA step-up and cannot be approved or replayed.
+
+
 - Preserve a masked sign-in password typed while the initial anonymous session
   lookup is pending. Its 401 no longer clears the field before the user submits;
   native required-field validation can otherwise prevent the login POST entirely.

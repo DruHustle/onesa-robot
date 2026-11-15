@@ -24,7 +24,7 @@ test('Stop can complete before an unrelated operator mutation and verifies the a
   const seen = [];
   const api = (path, options = {}) => {
     seen.push({path, options});
-    if (path === '/tasks') return stuckMutation;
+    if (path === '/tasks' && options.method === 'POST') return stuckMutation;
     if (path === '/stop') return {status:'stopped', physical_actuation:false};
     if (path === '/status') return {stopped:true, active_task:null, physical_actuation:false};
     if (path === '/tasks') return {tasks:[{state:'cancelled'}]};
@@ -34,7 +34,7 @@ test('Stop can complete before an unrelated operator mutation and verifies the a
   const unresolved = api('/tasks', {method:'POST', csrf:'synthetic-csrf'});
   const state = await stopSimulation('synthetic-csrf', api);
   assert.equal(state.stopped, true);
-  assert.deepEqual(seen.map(entry => entry.path), ['/tasks','/stop','/status','/humanoid/state']);
+  assert.deepEqual(seen.map(entry => entry.path), ['/tasks','/stop','/status','/tasks','/humanoid/state']);
   assert.deepEqual(seen[1].options, {method:'POST', csrf:'synthetic-csrf'});
   finishMutation({id:'synthetic-task'});
   await unresolved;

@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from robot_api import onesa_identity as identity
 from robot_api.main import Settings, create_app
+from robot_api.safety import Proposal
 from robot_api.security import password_hash
 
 PASSWORD = "robot-test-only-legacy-password"
@@ -575,3 +576,34 @@ def test_identity_mode_preserves_hardware_and_callback_configuration_boundaries(
         Settings(**{**values, "actuation_enabled": True})
     with pytest.raises(ValidationError):
         Settings(**{**values, "identity_callback_url": "https://attacker.example/callback"})
+
+
+def test_expired_proposal_does_not_block_identity_step_up(environment):
+    app, client, _, _ = environment
+    principal = person(mfa=False)
+    sign_in(client, _, principal)
+    created = client.post("/api/v1/tasks", json=proposal())
+    assert created.status_code == 201, created.text
+    task_id = created.json()["id"]
+    sim = app.state.sim
+
+    def expire():
+        row = sim.db.execute(
+            "SELECT proposal FROM tasks WHERE id=?", (task_id,)
+        ).fetchone()
+        stale = Proposal.model_validate_json(row["proposal"]).model_copy(
+            update={"issued_at": time.time() - 16}
+        )
+        sim.db.execute(
+            "UPDATE tasks SET proposal=? WHERE id=?",
+            (stale.model_dump_json(), task_id),
+        )
+        sim.db.commit()
+
+    client.portal.call(expire)
+    parameters = start(client, step_up=True)
+    assert parameters["prompt"] == ["login"]
+    assert parameters["acr_values"] == ["urn:onesa:mfa"]
+    history = client.get("/api/v1/tasks").json()["tasks"]
+    task = next(item for item in history if item["id"] == task_id)
+    assert (task["state"], task["reason"]) == ("cancelled", "proposal_expired")

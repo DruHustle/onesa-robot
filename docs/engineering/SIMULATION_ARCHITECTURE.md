@@ -129,8 +129,12 @@ flowchart LR
 
 No model output or ROS message grants authority. Quintic smooth-step trajectories
 are checked against synthetic SI-unit position/velocity/acceleration limits.
-Proposals expire after 15 seconds; UUID reuse is rejected. Only one task runs, owned
-by its approving session. Heartbeat loss, expiry, logout, cancel/stop, watchdog failure
+Proposals expire after 15 seconds; the safety tick turns stale or malformed
+unapproved legacy-joint and inspection proposals into terminal cancelled history,
+preserving corrupt evidence rather than rewriting it. This releases the pending-work
+lock for MFA step-up and other simulation modes. Cleanup is deferred while the remote
+journal is failed, so no unacknowledged write can weaken fenced recovery. UUID reuse is
+rejected. Only one task runs, owned by its approving session. Heartbeat loss, expiry, logout, cancel/stop, watchdog failure
 or restart removes in-memory execution authority. Operator reset never resumes work.
 
 Storage tables: sessions (hashed opaque token, CSRF, expiry, operator), tasks (ID,
