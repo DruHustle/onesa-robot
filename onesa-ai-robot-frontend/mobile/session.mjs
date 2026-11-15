@@ -41,7 +41,7 @@ export async function stopSimulation(csrf, api = call) {
   // The legacy joint and 33-axis humanoid simulators have independent task
   // registries. A green legacy latch alone does not establish whole-body idle.
   const humanoid = await api('/humanoid/state');
-  if (humanoid?.stopped !== true || humanoid.active_command !== null ||
+  if (humanoid?.connection !== 'simulated_actuators' || humanoid?.stopped !== true || humanoid.active_command !== null ||
       humanoid.pending !== null || humanoid.physical_actuation !== false) {
     throw Error('Humanoid Stop state could not be verified.');
   }

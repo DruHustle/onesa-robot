@@ -42,7 +42,7 @@ test('Stop can complete before an unrelated operator mutation and verifies the a
 test('Stop fails closed if the backend does not acknowledge the safety state', async () => {
   const safe = {status:'stopped', physical_actuation:false};
   const idle = {stopped:true, active_task:null, physical_actuation:false};
-  const whole = {stopped:true, active_command:null, pending:null, physical_actuation:false};
+  const whole = {connection:'simulated_actuators', stopped:true, active_command:null, pending:null, physical_actuation:false};
   for (const [label, ack, status, humanoid, count] of [
     ['missing acknowledgement', {}, undefined, undefined, 1],
     ['falsified physical flag', {status:'stopped', physical_actuation:true}, undefined, undefined, 1],
@@ -53,6 +53,8 @@ test('Stop fails closed if the backend does not acknowledge the safety state', a
     ['whole-body active', safe, idle, {...whole,active_command:'in-flight'}, 3],
     ['whole-body pending', safe, idle, {...whole,pending:{id:'proposed'}}, 3],
     ['whole-body fault', safe, idle, new Error('fault'), 3],
+    ['faulted humanoid readback', safe, idle, {...whole, connection:'simulator_fault'}, 3],
+    ['missing humanoid connection', safe, idle, {...whole, connection:undefined}, 3],
     ['whole-body physical flag uncertain', safe, idle, {...whole,physical_actuation:undefined}, 3],
   ]) {
     const seen = [];
