@@ -10,7 +10,7 @@ const positions=()=>Object.fromEntries(model.joints.map(j=>[j.name,0]));
 async function fixture(page,{sharedIdentity=false}={}){
  let pending=null,active=null,stops=0,unavailable=false,authenticated=true,stopped=false,leaveActiveOnStop=false;
  let connection='simulated_actuators';
- let heldPath=null,release=null,entered=0,heartbeats=0;
+ let heldPath=null,release=null,entered=0,heartbeats=0,lateHeartbeats=0;
  const observation=()=>({model_id:model.model_id,mode:'simulation',connection,physical_actuation:false,stopped,owns_active:Boolean(active),positions:positions(),pending,active_command:active,history:[]});
  await page.route('**/api/v1/**',async route=>{
   const path=new URL(route.request().url()).pathname;let status=200,body={};
@@ -29,8 +29,8 @@ async function fixture(page,{sharedIdentity=false}={}){
    expect(route.request().postDataJSON().expected_plan_sha256).toBe(pending.plan_sha256);
    active=pending.request.command_id;pending=null;body=observation();
   }else if(path.endsWith('/humanoid/heartbeat')){
-   expect(route.request().postDataJSON().command_id).toBe(active);heartbeats++;
-   body={status:'received'};
+   if(stopped||!active){lateHeartbeats++;status=409;body={detail:'Humanoid command is no longer running'};}
+   else{expect(route.request().postDataJSON().command_id).toBe(active);heartbeats++;body={status:'received'};}
   }else if(path.endsWith('/tasks'))body={tasks:[]};
   else if(path.endsWith('/status'))body={mode:'simulation',physical_actuation:false,stopped,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
   else if(!path.endsWith('/heartbeat')){status=404;body={detail:'Unexpected fixture route'};}
@@ -47,7 +47,7 @@ async function fixture(page,{sharedIdentity=false}={}){
  await expect(page.locator('#humanoid-propose')).toBeEnabled();
  return {
   get stops(){return stops;},get entered(){return entered;},get heartbeats(){return heartbeats;},
-  get pending(){return pending;},get active(){return active;},
+  get pending(){return pending;},get active(){return active;},get lateHeartbeats(){return lateHeartbeats;},
   fail(){unavailable=true;},loseSession(){authenticated=false;},
   fault(){connection='simulator_fault';},
   leaveActiveOnStop(){leaveActiveOnStop=true;},
@@ -110,13 +110,14 @@ test('Stop readback that still reports an active command keeps heartbeat paused'
 
 test('the shared console Stop pauses humanoid supervision and verifies both views',async({page})=>{
  const state=await fixture(page);await propose(page);await approve(page);
- const heartbeats=state.heartbeats;
  await page.locator('#stop').click();
  await expect.poll(()=>state.stops).toBe(1);
+ const heartbeatsAfterStop=state.heartbeats;
  await expect(page.locator('#next-step')).toContainText('Stopped');
  await expect(page.locator('#humanoid-state')).toContainText('Stopped');
  await page.waitForTimeout(650);
- expect(state.heartbeats).toBe(heartbeats);
+ expect(state.heartbeats).toBe(heartbeatsAfterStop);
+ expect(state.lateHeartbeats).toBe(0);
 });
 
 test('telemetry failure pauses supervision and closing still stops unresolved motion',async({page})=>{
