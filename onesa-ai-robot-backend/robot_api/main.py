@@ -11,6 +11,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlencode, urlsplit
@@ -760,7 +761,62 @@ class State:
         self.db.commit()
         self.active = None
 
+    def expire_proposals(self) -> None:
+        # An unapproved proposal is useful only inside the same freshness window
+        # enforced by SafetyGate.validate(). Retire abandoned/corrupt records so
+        # they cannot indefinitely block MFA step-up, humanoid work or permission.
+        # A failed remote journal must remain fail-closed and must not accumulate
+        # unacknowledged cleanup writes that would prevent fenced recovery.
+        if self.journal_failed:
+            return
+        now = time.time()
+        changed = False
+        rows = self.db.execute("SELECT id,proposal FROM tasks WHERE state='proposed'").fetchall()
+        for row in rows:
+            try:
+                proposal = Proposal.model_validate_json(row["proposal"])
+                age = now - proposal.issued_at
+                if isfinite(age) and -1 <= age <= self.gate.freshness_seconds:
+                    continue
+                reason = (
+                    "proposal_invalid_timestamp"
+                    if not isfinite(age) or age < -1
+                    else "proposal_expired"
+                )
+                if proposal.inspection is not None:
+                    self.interrupt_inspection(row, reason)
+            except (ValueError, TypeError):
+                # Keep the original proposal bytes for diagnosis. Distinguish a
+                # corrupt inspection extension from an invalid legacy proposal.
+                try:
+                    payload = json.loads(row["proposal"])
+                except (ValueError, TypeError):
+                    payload = None
+                reason = (
+                    "inspection_integrity"
+                    if isinstance(payload, dict) and payload.get("inspection") is not None
+                    else "proposal_integrity"
+                )
+            current = self.db.execute("SELECT state FROM tasks WHERE id=?", (row["id"],)).fetchone()
+            if current is None:
+                continue
+            if current["state"] == "proposed":
+                updated = self.db.execute(
+                    "UPDATE tasks SET state='cancelled',reason=? WHERE id=? AND state='proposed'",
+                    (reason, row["id"]),
+                )
+                if updated.rowcount:
+                    self.dirty(row["id"])
+                    changed = True
+            elif current["state"] == "cancelled":
+                # interrupt_inspection() may already have terminally cancelled
+                # corrupt inspection evidence and queued its durable journal write.
+                changed = True
+        if changed:
+            self.db.commit()
+
     def tick(self) -> None:
+        self.expire_proposals()
         whole = self.humanoid
         owner = whole.active.owner if whole.active else whole.pending[0] if whole.pending else None
         if owner:
@@ -1348,8 +1404,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         attempts.append(time.monotonic())
         state_value, nonce, verifier = identity.new_transaction()
         if value.mobile:
-            if value.step_up:
-                raise HTTPException(422, "Start a new mobile sign-in")
+            # Native step-up uses the same one-use deep-link transaction. The
+            # existing finish_identity path binds it to the live subject and
+            # requires fresh central MFA before replacing the current session.
             state_value = "native_" + state_value
         browser = secrets.token_urlsafe(32)
         sim.identity_flows[token_hash(state_value)] = IdentityFlow(
