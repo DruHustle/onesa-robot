@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- Support native same-account Onesa MFA step-up for simulation approval and
+  Stop reset. The native client refreshes its rotated product session/CSRF only
+  after backend verification; regressions reject a different subject or a
+  non-MFA assertion without replacing the existing session.
+
 - Expire abandoned legacy-joint and inspection proposals in the safety tick.
   Stale timestamps become terminal cancelled history; malformed proposal bytes
   are preserved with a terminal integrity reason. Cleanup is deferred while the

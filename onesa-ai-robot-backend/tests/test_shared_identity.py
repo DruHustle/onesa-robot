@@ -104,8 +104,10 @@ def environment(tmp_path, monkeypatch):
         yield app, client, issuer, config
 
 
-def start(client, *, step_up=False):
-    result = client.post("/api/v1/auth/identity/start", json={"step_up": step_up})
+def start(client, *, step_up=False, mobile=False):
+    result = client.post(
+        "/api/v1/auth/identity/start", json={"step_up": step_up, "mobile": mobile}
+    )
     assert result.status_code == 200, result.text
     authorization = result.json()["authorization_url"]
     assert "synthetic-client-secret" not in authorization
@@ -119,6 +121,31 @@ def finish(client, issuer, principal, parameters):
         "/api/v1/auth/identity/callback",
         params={"code": issuer.code(principal), "state": parameters["state"][0], "iss": ISSUER},
         follow_redirects=False,
+    )
+
+
+def finish_mobile(client, issuer, principal, parameters):
+    callback = client.get(
+        "/api/v1/auth/identity/callback",
+        params={
+            "code": issuer.code(principal),
+            "state": parameters["state"][0],
+            "iss": ISSUER,
+        },
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    returned = urlsplit(callback.headers["location"])
+    assert (returned.scheme, returned.netloc, returned.path) == (
+        "onesarobot",
+        "account",
+        "/callback",
+    )
+    values = parse_qs(returned.query)
+    assert values["state"] == parameters["state"]
+    return client.post(
+        "/api/v1/auth/identity/mobile/exchange",
+        json={"state": values["state"][0], "code": values["code"][0]},
     )
 
 
@@ -576,6 +603,49 @@ def test_identity_mode_preserves_hardware_and_callback_configuration_boundaries(
         Settings(**{**values, "actuation_enabled": True})
     with pytest.raises(ValidationError):
         Settings(**{**values, "identity_callback_url": "https://attacker.example/callback"})
+
+
+def test_mobile_identity_step_up_requires_same_subject_and_fresh_mfa(environment):
+    app, client, issuer, _ = environment
+    original = person(mfa=False)
+    sign_in(client, issuer, original)
+    before = client.get("/api/v1/auth/me").json()
+    parameters = start(client, step_up=True, mobile=True)
+    assert parameters["prompt"] == ["login"]
+    assert parameters["max_age"] == ["0"]
+    assert parameters["acr_values"] == ["urn:onesa:mfa"]
+    assert parameters["state"][0].startswith("native_")
+    completed = finish_mobile(
+        client, issuer, person(subject=original.subject, mfa=True), parameters
+    )
+    assert completed.status_code == 200, completed.text
+    current = client.get("/api/v1/auth/me")
+    assert current.status_code == 200
+    assert current.json()["authentication_method"] == "onesa"
+    assert current.json()["confirmation_expires_at"] > time.time()
+    assert current.json()["csrf"] != before["csrf"]
+    assert len(app.state.sim.identity_sessions) == 1
+
+
+@pytest.mark.parametrize("replacement", ["different_subject", "missing_mfa"])
+def test_mobile_step_up_rejects_wrong_subject_or_missing_mfa_without_replacing_session(
+    environment, replacement
+):
+    app, client, issuer, _ = environment
+    original = person(mfa=False)
+    sign_in(client, issuer, original)
+    parameters = start(client, step_up=True, mobile=True)
+    principal = (
+        person(subject=str(uuid4()), mfa=True)
+        if replacement == "different_subject"
+        else person(subject=original.subject, mfa=False)
+    )
+    response = finish_mobile(client, issuer, principal, parameters)
+    assert response.status_code == 401
+    current = client.get("/api/v1/auth/me")
+    assert current.status_code == 200
+    assert current.json()["confirmation_expires_at"] is None
+    assert len(app.state.sim.identity_sessions) == 1
 
 
 def test_expired_proposal_does_not_block_identity_step_up(environment):

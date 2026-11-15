@@ -18,6 +18,28 @@ for (const [scenario, value] of Object.entries({correct:CALLBACK+'?state='+state
   });
 }
 
+test('native sign-in supports same-account MFA step-up', async () => {
+  const state = 'native_' + 'B'.repeat(43);
+  const url = 'https://auth.onesa.eu/authorize?state=' + state +
+    '&code_challenge_method=S256&prompt=login&max_age=0&acr_values=urn%3Aonesa%3Amfa';
+  const seen = [];
+  const api = async (path, options) => {
+    seen.push({path, options});
+    if (path === AUTH + '/start') return {authorization_url:url};
+    assert.deepEqual(options.body, {state, code:'mfa-code'});
+    return {signed_in:true};
+  };
+  const result = await signIn(async (authorize, callback) => {
+    assert.equal(authorize, url);
+    assert.equal(callback, CALLBACK);
+    return {type:'success', url:CALLBACK+'?state='+state+'&code=mfa-code'};
+  }, api, {stepUp:true});
+  assert.deepEqual(result, {signed_in:true});
+  assert.deepEqual(seen[0].options.body, {mobile:true, step_up:true});
+  assert.equal(seen[1].path, AUTH + '/mobile/exchange');
+});
+
+
 test('Stop can complete before an unrelated operator mutation and verifies the actual latch', async () => {
   let finishMutation;
   const stuckMutation = new Promise(resolve => { finishMutation = resolve; });

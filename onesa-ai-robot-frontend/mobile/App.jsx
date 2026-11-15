@@ -85,16 +85,35 @@ export default function App() {
 
   function confirmCommand(title, action) {
     Alert.alert(title,
-      'This affects only the software simulator. A recent Onesa MFA confirmation is required; no physical actuator is connected.',
+      'This affects only the software simulator. You may be asked to confirm your Onesa identity with MFA in the system browser; no physical actuator is connected.',
       [{text:'Cancel',style:'cancel'}, {text:'Confirm simulation',onPress:()=>perform(action)}]);
+  }
+  async function requireMfa() {
+    if (account?.authentication_method !== 'onesa') {
+      throw Error('Confirm this operation with your Onesa account.');
+    }
+    if (Number(account.confirmation_expires_at) > Date.now()/1000) return csrf;
+    await signIn(Browser.openAuthSessionAsync, call, {stepUp:true});
+    const user = await call('/auth/me');
+    if (user.authentication_method !== 'onesa' ||
+        !Number.isFinite(user.confirmation_expires_at) ||
+        user.confirmation_expires_at <= Date.now()/1000 ||
+        typeof user.csrf !== 'string' || !user.csrf) {
+      throw Error('Onesa MFA step-up could not be verified. Do not retry the operation yet.');
+    }
+    await SecureStore.setItemAsync('csrf',user.csrf,{keychainAccessible:SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY});
+    setAccount(user); setCsrf(user.csrf);
+    return user.csrf;
   }
   async function approve() {
     if (!selected || selected.state !== 'proposed') return;
-    await call('/tasks/'+selected.id+'/approve',{method:'POST',csrf,body:{confirmed:true}});
+    const currentCsrf = await requireMfa();
+    await call('/tasks/'+selected.id+'/approve',{method:'POST',csrf:currentCsrf,body:{confirmed:true}});
     await refresh();
   }
   async function reset() {
-    const response = await call('/reset',{method:'POST',csrf,body:{confirmed:true}});
+    const currentCsrf = await requireMfa();
+    const response = await call('/reset',{method:'POST',csrf:currentCsrf,body:{confirmed:true}});
     if (response?.status !== 'reset' || response.physical_actuation !== false) {
       throw Error('Simulator reset could not be acknowledged.');
     }

@@ -56,8 +56,11 @@ export async function stopSimulation(csrf, api = call) {
   return status;
 }
 
-export async function signIn(openBrowser, api = call) {
-  const start = await api(AUTH + '/start', {method:'POST', body:{mobile:true}});
+export async function signIn(openBrowser, api = call, {stepUp = false} = {}) {
+  const start = await api(AUTH + '/start', {
+    method:'POST',
+    body:{mobile:true, step_up:stepUp}
+  });
   const url = new URL(start.authorize_url || start.authorization_url);
   const state = url.searchParams.get('state');
   if (url.origin !== 'https://auth.onesa.eu' || url.pathname !== '/authorize' ||

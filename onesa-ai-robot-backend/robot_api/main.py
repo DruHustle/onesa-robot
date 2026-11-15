@@ -1396,8 +1396,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         attempts.append(time.monotonic())
         state_value, nonce, verifier = identity.new_transaction()
         if value.mobile:
-            if value.step_up:
-                raise HTTPException(422, "Start a new mobile sign-in")
+            # Native step-up uses the same one-use deep-link transaction. The
+            # existing finish_identity path binds it to the live subject and
+            # requires fresh central MFA before replacing the current session.
             state_value = "native_" + state_value
         browser = secrets.token_urlsafe(32)
         sim.identity_flows[token_hash(state_value)] = IdentityFlow(

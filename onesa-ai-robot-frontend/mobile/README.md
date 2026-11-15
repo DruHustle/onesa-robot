@@ -27,10 +27,13 @@ joint task, cancel a proposal, and reset the simulator Stop latch. Approve and
 reset require an explicit second confirmation and the backend's fresh Onesa
 MFA check; native UI confirmation is not a substitute for MFA. A rejected
 operation never overrides the server's stop epoch, access grants or task
-ownership. The current 0.1.0 UI does not provide a complete native MFA
-step-up flow or continuous running-task supervision. Only the backend's
-bounded simulator and watchdog are exercised; native availability and
-production identity/provider acceptance remain separate release blockers.
+ownership. The native UI performs same-account Onesa MFA step-up in the system browser
+before approval or Stop reset when the current confirmation has expired. The
+backend verifies the original subject and a fresh MFA assertion before rotating
+the product session and CSRF token. Continuous native running-task supervision
+is still incomplete. Only the backend's bounded simulator and watchdog are
+exercised; native availability and production identity/provider acceptance
+remain separate release blockers.
 No hardware, ROS actuation or store submission is authorized by this UI.
 
 Run `npm test` for pure native network/Stop regressions. Required before
