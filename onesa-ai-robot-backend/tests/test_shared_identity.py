@@ -579,9 +579,9 @@ def test_identity_mode_preserves_hardware_and_callback_configuration_boundaries(
 
 
 def test_expired_proposal_does_not_block_identity_step_up(environment):
-    app, client, _, _ = environment
+    app, client, issuer, _ = environment
     principal = person(mfa=False)
-    sign_in(client, _, principal)
+    sign_in(client, issuer, principal)
     created = client.post("/api/v1/tasks", json=proposal())
     assert created.status_code == 201, created.text
     task_id = created.json()["id"]
