@@ -1,6 +1,33 @@
+test('native API origin defaults to the production Robot origin', () => {
+  assert.equal(resolveApiOrigin(undefined), 'https://robot.onesa.eu');
+  assert.equal(resolveApiOrigin(''), 'https://robot.onesa.eu');
+  assert.equal(ORIGIN, resolveApiOrigin(process.env.EXPO_PUBLIC_ROBOT_API_ORIGIN));
+});
+
+test('native API origin supports isolated HTTPS Onesa staging hosts', () => {
+  assert.equal(resolveApiOrigin('https://robot-staging.onesa.eu'), 'https://robot-staging.onesa.eu');
+  assert.equal(resolveApiOrigin('https://robot-preview.onesa.eu/'), 'https://robot-preview.onesa.eu');
+});
+
+test('native API origin rejects insecure, path-bearing and off-domain overrides', () => {
+  for (const value of [
+    'http://robot-staging.onesa.eu',
+    'https://robot.onesa.eu/api/v1',
+    'https://robot.onesa.eu?tenant=other',
+    'https://robot.onesa.eu#fragment',
+    'https://operator@robot.onesa.eu',
+    'https://robot.onesa.eu.evil.example',
+    'https://example.com',
+    'https://robot-staging.onesa.eu:8443',
+    'not-an-origin',
+  ]) {
+    assert.throws(() => resolveApiOrigin(value), /HTTPS.*Onesa origin/);
+  }
+});
+
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {signIn, CALLBACK, AUTH, stopSimulation} from './session.mjs';
+import {signIn, CALLBACK, AUTH, stopSimulation, resolveApiOrigin, ORIGIN} from './session.mjs';
 const state = 'native_' + 'A'.repeat(43);
 const url = 'https://auth.onesa.eu/authorize?state=' + state + '&code_challenge_method=S256';
 for (const [scenario, value] of Object.entries({correct:CALLBACK+'?state='+state+'&code=fixture', stale:CALLBACK+'?state=wrong&code=fixture', foreign:'wrong://account/callback?state='+state+'&code=fixture', duplicate:CALLBACK+'?state='+state+'&code=fixture&code=other', cancelled:CALLBACK+'?state='+state+'&error=cancelled'})) {
