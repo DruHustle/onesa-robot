@@ -227,7 +227,7 @@ async function refresh(force=true) {
     simulatorStopped=status.stopped;
     setObservationReady(true);
     void inspector.refresh(status);
-  } catch(error) {if(current!==generation) return;if(error.status===401){signedOut();notice(error.message);return;}if(revision!==observationRevision)return;setObservationReady(false);byId('reset-form').hidden=!simulatorStopped;inspector.stale();byId('stop-state').textContent='Unavailable — current observation could not be verified';byId('connection').textContent='Disconnected — telemetry is stale; the gateway watchdog stops running simulation tasks.';byId('position').textContent='Stale · latest response unavailable';byId('next-step').textContent=operatorNextStep(null,'');notice(error.message);}
+  } catch(error) {if(current!==generation) return;if(error.status===401){signedOut();notice(error.message);return;}if(revision!==observationRevision)return;setObservationReady(false);byId('reset-form').hidden=false;inspector.stale();byId('stop-state').textContent='Unavailable — current observation could not be verified';byId('connection').textContent='Disconnected — telemetry is stale; the gateway watchdog stops running simulation tasks.';byId('position').textContent='Stale · latest response unavailable';byId('next-step').textContent=operatorNextStep(null,'');notice(error.message);}
   finally {await Promise.allSettled(observations);if(polling===owner)polling=null;owner.finish();}
 }
 const unavailableSignIn='Simulator is unavailable. Your sign-in entries are retained. Wait a moment, then select Sign in again.';
