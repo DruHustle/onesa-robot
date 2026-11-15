@@ -27,7 +27,7 @@ test('Stop can complete before an unrelated operator mutation and verifies the a
     if (path === '/tasks') return stuckMutation;
     if (path === '/stop') return {status:'stopped', physical_actuation:false};
     if (path === '/status') return {stopped:true, active_task:null, physical_actuation:false};
-    if (path === '/humanoid/state') return {stopped:true, active_command:null, pending:null, physical_actuation:false};
+    if (path === '/humanoid/state') return {connection:'simulated_actuators', stopped:true, active_command:null, pending:null, physical_actuation:false};
     throw Error('Unexpected endpoint');
   };
   const unresolved = api('/tasks', {method:'POST', csrf:'synthetic-csrf'});

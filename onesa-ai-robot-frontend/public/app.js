@@ -2,13 +2,30 @@ import {createInspection} from './inspection.js';
 import {RobotClient} from './client.js';
 const client = new RobotClient();
 const byId = id => document.getElementById(id);
+window.addEventListener('onesa:stop-requested',()=>{
+ client.supervisionPaused=true;
+ observationRevision++;
+ client.cancelPending();
+ setObservationReady(false);
+});
+window.addEventListener('onesa:stop-verified',()=>{
+ client.supervisionPaused=false;
+ void refresh();
+});
 let fastPoll=false,lastIdlePoll=0;
 const localSimulator = ['127.0.0.1','localhost','[::1]'].includes(window.location?.hostname);
 let identityEnabled=false,identitySession=false,identityEndpoint='',identityConfirmationExpires=0,canOperate=true;
-let csrf = '', proposalId = '', timer, polling = null, generation=0, observationRevision=0, suspended=false, observationReady=false;
+let csrf = '', proposalId = '', timer, polling = null, generation=0, observationRevision=0, suspended=false, observationReady=false, simulatorStopped=true;
 const busyForms=new WeakSet();
 const observationForms=[['reset-form','reset-submit'],['proposal-form','proposal-submit'],['approval-form','approve-submit'],['mission-form','mission-submit'],['mission-approval','mission-approve-submit']];
-function setObservationReady(ready){observationReady=ready;for(const [formId,buttonId]of observationForms)byId(buttonId).disabled=!ready||!canOperate||(identitySession&&identityConfirmationExpires<=Date.now()/1000)||busyForms.has(byId(formId));}
+function setObservationReady(ready){
+ observationReady=ready;
+ const authorized=ready&&canOperate&&(!identitySession||identityConfirmationExpires>Date.now()/1000);
+ for(const [formId,buttonId]of observationForms){
+  const allowed=formId==='reset-form'?simulatorStopped:!simulatorStopped;
+  byId(buttonId).disabled=!authorized||!allowed||busyForms.has(byId(formId));
+ }
+}
 let administrator=false,permissionRevision=null,permissionRead=null,lastPermissionRead=0;
 function operatorNextStep(status,proposal){if(!status||typeof status.stopped!=='boolean'||!(status.active_task===null||typeof status.active_task==='string'))return 'Waiting for a current simulator observation. Stop remains available.';if(status.stopped)return identitySession?'Stopped. Confirm your identity and review the reset; no previous task resumes.':'Stopped. Confirm your password to reset; no previous task resumes.';if(status.active_task)return 'Simulation running. Monitor the result or use Stop simulation.';if(proposal)return 'Review the proposed target and duration, then confirm within 15 seconds or cancel.';return 'Ready. Set a target and duration, then create a proposal.';}
 const notice = text => { byId('notice').textContent = text; };
@@ -20,7 +37,7 @@ function sessionPresentation(authenticated){
  if(heading)heading.textContent=authenticated?'Industrial inspection':'Operator Console';
  if(description)description.textContent=authenticated?'Plan, supervise and review a synthetic pump inspection. No physical device is connected.':'Use your approved operator account to access development simulation.';
 }
-function signedOut({preserveInitialSignIn=false}={}) {setIdentitySession({});inspector.reset();fastPoll=false;lastIdlePoll=0;sessionPresentation(false);setObservationReady(false);generation++; clearInterval(timer);csrf='';client.csrf='';proposalId='';setAdministrator({});byId('operator').hidden=true;byId('login-form').hidden=identityEnabled||!localSimulator;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=!(identityEnabled||!localSimulator);byId('approval-form').hidden=true;byId('history').replaceChildren();for(const field of document.querySelectorAll('input[type="password"]'))if(!preserveInitialSignIn||field.id!=='password')field.value=''; }
+function signedOut({preserveInitialSignIn=false}={}) {setIdentitySession({});inspector.reset();fastPoll=false;lastIdlePoll=0;sessionPresentation(false);simulatorStopped=true;setObservationReady(false);generation++; clearInterval(timer);csrf='';client.csrf='';proposalId='';setAdministrator({});byId('operator').hidden=true;byId('login-form').hidden=identityEnabled||!localSimulator;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=!(identityEnabled||!localSimulator);byId('approval-form').hidden=true;byId('history').replaceChildren();for(const field of document.querySelectorAll('input[type="password"]'))if(!preserveInitialSignIn||field.id!=='password')field.value=''; }
 function setIdentitySession(session){
  identitySession=session.authentication_method==='onesa';canOperate=session.role!=='viewer';
  identityConfirmationExpires=Number(session.confirmation_expires_at)||0;
@@ -158,10 +175,11 @@ async function changePhysicalPermission(change,current) {
  }
 }
 function verifiedObservation(status,tasks){
+ const validTasks=Array.isArray(tasks)&&tasks.every(task=>typeof task?.id==='string'&&['proposed','running','completed','cancelled'].includes(task.state)&&typeof task.reason==='string'&&Number.isFinite(task.created)&&Number.isFinite(task.position));
  return status?.mode==='simulation'&&status.physical_actuation===false&&typeof status.stopped==='boolean'&&
   Number.isFinite(status.position_radians)&&Number.isFinite(status.sampled_at)&&
   (status.active_task===null||typeof status.active_task==='string')&&typeof status.capabilities?.edge_telemetry==='string'&&
-  Array.isArray(tasks)&&tasks.every(task=>typeof task?.id==='string'&&['proposed','running','completed','cancelled'].includes(task.state)&&typeof task.reason==='string'&&Number.isFinite(task.created)&&Number.isFinite(task.position));
+  validTasks&&(!status.stopped||(status.active_task===null&&tasks.every(task=>['completed','cancelled'].includes(task.state))));
 }
 async function refresh(force=true) {
   if(document.hidden||!force&&!fastPoll&&performance.now()-lastIdlePoll<3000)return;
@@ -206,9 +224,10 @@ async function refresh(force=true) {
     byId('environment').hidden=false;
     byId('history').replaceChildren(...tasks.map(task=>{const li=document.createElement('li');li.textContent=`${task.state} · ${task.id} · ${task.reason} · ${new Date(task.created*1000).toLocaleString()} · ${Number(task.position).toFixed(4)} rad`;if(task.state==='running'){const button=document.createElement('button');button.textContent='Cancel running task';button.addEventListener('click',()=>run(()=>client.cancel(task.id),'Task cancelled; simulation stopped.'));li.append(button);}return li;}));
     if(!tasks.length){const li=document.createElement('li');li.textContent='No simulation tasks yet. Reset the stop state to create a proposal.';byId('history').append(li);}
+    simulatorStopped=status.stopped;
     setObservationReady(true);
     void inspector.refresh(status);
-  } catch(error) {if(current!==generation) return;if(error.status===401){signedOut();notice(error.message);return;}if(revision!==observationRevision)return;setObservationReady(false);byId('reset-form').hidden=false;inspector.stale();byId('stop-state').textContent='Unavailable — current observation could not be verified';byId('connection').textContent='Disconnected — telemetry is stale; the gateway watchdog stops running simulation tasks.';byId('position').textContent='Stale · latest response unavailable';byId('next-step').textContent=operatorNextStep(null,'');notice(error.message);}
+  } catch(error) {if(current!==generation) return;if(error.status===401){signedOut();notice(error.message);return;}if(revision!==observationRevision)return;setObservationReady(false);byId('reset-form').hidden=!simulatorStopped;inspector.stale();byId('stop-state').textContent='Unavailable — current observation could not be verified';byId('connection').textContent='Disconnected — telemetry is stale; the gateway watchdog stops running simulation tasks.';byId('position').textContent='Stale · latest response unavailable';byId('next-step').textContent=operatorNextStep(null,'');notice(error.message);}
   finally {await Promise.allSettled(observations);if(polling===owner)polling=null;owner.finish();}
 }
 const unavailableSignIn='Simulator is unavailable. Your sign-in entries are retained. Wait a moment, then select Sign in again.';
@@ -246,7 +265,7 @@ async function run(action, success, form=null,expectedGeneration=null) {
   const controls=form?[...form.querySelectorAll('button[type="submit"]')]:[];
   if(form){busyForms.add(form);form.setAttribute('aria-busy','true');controls.forEach(control=>control.disabled=true);}
   try {await action();if(suspended||expectedGeneration!==null&&expectedGeneration!==generation)return;observationRevision++;setObservationReady(false);inspector.stale();notice(success);await refresh();}
-  catch(error){if(suspended||expectedGeneration!==null&&expectedGeneration!==generation)return;if(error.status===401) signedOut();notice(form?.id==='login-form'&&([502,503,504].includes(error.status)||['AbortError','TimeoutError','TypeError'].includes(error.name))?unavailableSignIn:error.message);}
+  catch(error){if(suspended||expectedGeneration!==null&&expectedGeneration!==generation)return;if(error.status===401) signedOut();if(client.supervisionPaused){setObservationReady(false);inspector.stale();byId('stop-state').textContent='Unavailable — Stop state not verified; supervision heartbeat paused.';}notice(form?.id==='login-form'&&([502,503,504].includes(error.status)||['AbortError','TimeoutError','TypeError'].includes(error.name))?unavailableSignIn:error.message);}
   finally{if(form){busyForms.delete(form);form.removeAttribute('aria-busy');controls.forEach(control=>control.disabled=observationForms.some(([id])=>id===form.id)&&!observationReady);if(form.id==='physical-permission-form')updatePermissionControls();}}
 }
 byId('login-form').addEventListener('submit',event=>{
@@ -279,7 +298,7 @@ byId('reset-form').addEventListener('submit',event=>{event.preventDefault();cons
 byId('proposal-form').addEventListener('submit',event=>{event.preventDefault();run(async()=>{const target=Number(byId('target').value),duration=Number(byId('duration').value);const data=await client.propose({command_id:crypto.randomUUID(),issued_at:Date.now()/1000,target_radians:target,duration_seconds:duration});proposalId=data.id;byId('proposal-summary').textContent=`Target ${target} radians over ${duration} seconds. Review this synthetic movement before confirming. Approval expires after 15 seconds.`;byId('proposed-id').textContent=proposalId;byId('approval-form').hidden=false;byId(identitySession?'approve-password-confirmed':'approve-password').focus();},'Proposal created. Confirm within 15 seconds.',event.currentTarget);});
 byId('approval-form').addEventListener('submit',event=>{event.preventDefault();const confirmation=readConfirmation('approve-password');run(async()=>{await client.approve(proposalId,confirmation);byId('approval-form').hidden=true;proposalId='';},'Simulation running; heartbeat must remain connected.',event.currentTarget);});
 byId('cancel').addEventListener('click',()=>run(async()=>{await client.cancel(proposalId);byId('approval-form').hidden=true;proposalId='';},'Proposal cancelled.'));
-byId('stop').addEventListener('click',()=>run(()=>client.stop(),'Simulation stopped. Reset requires confirmation.'));
+byId('stop').addEventListener('click',()=>{window.dispatchEvent(new Event('onesa:stop-requested'));run(async()=>{await client.stop();window.dispatchEvent(new Event('onesa:stop-verified'));},'Simulation stopped and verified. Reset requires confirmation.');});
 byId('logout').addEventListener('click',()=>run(async()=>{const result=await client.logout();signedOut();if(result.identity_signed_out===false)throw new Error('Signed out of Robot. Open your Onesa account to finish signing out of other applications.');},identitySession?'Signed out of Onesa. Other applications will require sign-in.':'Signed out; this session cannot authorize further tasks.'));
 // No localStorage/sessionStorage, token URLs or persistence of operator credentials.
 
