@@ -64,7 +64,7 @@ test('Stop can complete before an unrelated operator mutation and verifies the a
 
 test('Stop fails closed if the backend does not acknowledge the safety state', async () => {
   const safe = {status:'stopped', physical_actuation:false};
-  const idle = {stopped:true, active_task:null, physical_actuation:false};
+  const idle = {mode:'simulation', stopped:true, active_task:null, physical_actuation:false};
   const terminalHistory = {tasks:[{state:'cancelled'},{state:'completed'}]};
   const whole = {connection:'simulated_actuators', stopped:true, active_command:null, pending:null, physical_actuation:false};
   for (const [label, ack, status, history, humanoid, count] of [
@@ -72,6 +72,7 @@ test('Stop fails closed if the backend does not acknowledge the safety state', a
     ['falsified physical flag', {status:'stopped', physical_actuation:true}, undefined, undefined, undefined, 1],
     ['still active', safe, {stopped:true, active_task:'running', physical_actuation:false}, undefined, undefined, 2],
     ['latch not set', safe, {stopped:false, active_task:null, physical_actuation:false}, undefined, undefined, 2],
+    ['unexpected operating mode', safe, {...idle, mode:'live'}, undefined, undefined, 2],
     ['physical flag uncertain', safe, {stopped:true, active_task:null}, undefined, undefined, 2],
     ['status readback unavailable', safe, new Error('offline'), undefined, undefined, 2],
     ['history still contains a running task', safe, idle, {tasks:[{state:'running'}]}, undefined, 3],
