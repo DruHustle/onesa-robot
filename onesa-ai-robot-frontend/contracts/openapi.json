@@ -4286,6 +4286,16 @@
             },
             "description": "Successful Response"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "The task has already completed."
+          },
           "422": {
             "content": {
               "application/json": {
