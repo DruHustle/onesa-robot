@@ -4,7 +4,7 @@
 
 ## Unreleased
 
-- Make the native Robot API origin an explicit build-time Expo setting. Staging bundles can target the exact approved HTTPS Render staging API origin instead of silently calling production; only the production and staging service origins are allowlisted, and malformed, insecure, path-bearing and off-origin overrides fail closed. The production origin remains the default for production builds. Regression coverage checks accepted staging origins and rejected unsafe overrides.
+- Make the native Robot API origin an explicit build-time Expo setting. Staging bundles can target the exact approved HTTPS Render staging API origin instead of silently calling production; only the production and staging service origins are allowlisted, and malformed, insecure, path-bearing and off-origin overrides fail closed. The production origin remains the default for production builds. Regression coverage checks accepted staging origins and rejected unsafe overrides. Internal Android/iOS CI builds now receive the exact approved staging API origin and verify that it is embedded in each retained bundle, preventing a test artifact from silently targeting production.
 
 
 - Preserve precise terminal integrity classification when the safety tick retires
