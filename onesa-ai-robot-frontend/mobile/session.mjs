@@ -38,6 +38,13 @@ export async function stopSimulation(csrf, api = call) {
   if (status?.stopped !== true || status.active_task !== null || status.physical_actuation !== false) {
     throw Error('Simulator Stop state could not be verified.');
   }
+  // The legacy joint and 33-axis humanoid simulators have independent task
+  // registries. A green legacy latch alone does not establish whole-body idle.
+  const humanoid = await api('/humanoid/state');
+  if (humanoid?.stopped !== true || humanoid.active_command !== null ||
+      humanoid.pending !== null || humanoid.physical_actuation !== false) {
+    throw Error('Humanoid Stop state could not be verified.');
+  }
   return status;
 }
 
