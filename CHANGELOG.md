@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Make the native Robot API origin an explicit build-time Expo setting. Staging bundles can target an isolated HTTPS `*.onesa.eu` origin instead of silently calling production; malformed, insecure, path-bearing and off-domain overrides fail closed. The production origin remains the default for production builds. Regression coverage checks accepted staging origins and rejected unsafe overrides.
+
+
 - Preserve precise terminal integrity classification when the safety tick retires
   malformed inspection evidence. Legacy proposal corruption remains
   `proposal_integrity`; malformed inspection extensions become
