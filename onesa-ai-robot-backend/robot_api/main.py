@@ -786,9 +786,17 @@ class State:
                 if proposal.inspection is not None:
                     self.interrupt_inspection(row, reason)
             except (ValueError, TypeError):
-                # Keep the original proposal bytes for diagnosis; malformed
-                # evidence is terminal and can never be approved or replayed.
-                reason = "proposal_integrity"
+                # Keep the original proposal bytes for diagnosis. Distinguish a
+                # corrupt inspection extension from an invalid legacy proposal.
+                try:
+                    payload = json.loads(row["proposal"])
+                except (ValueError, TypeError):
+                    payload = None
+                reason = (
+                    "inspection_integrity"
+                    if isinstance(payload, dict) and payload.get("inspection") is not None
+                    else "proposal_integrity"
+                )
             current = self.db.execute("SELECT state FROM tasks WHERE id=?", (row["id"],)).fetchone()
             if current is None:
                 continue

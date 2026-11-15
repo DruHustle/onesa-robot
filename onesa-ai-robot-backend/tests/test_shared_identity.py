@@ -648,7 +648,12 @@ def test_mobile_step_up_rejects_wrong_subject_or_missing_mfa_without_replacing_s
 
 def test_expired_proposal_does_not_block_identity_step_up(environment):
     app, client, issuer, _ = environment
-    principal = person(mfa=False)
+    principal = person(mfa=True)
+    sign_in(client, issuer, principal)
+    reset = client.post("/api/v1/reset", json={"confirmed": True})
+    assert reset.status_code == 200, reset.text
+    assert client.post("/api/v1/auth/logout").status_code == 200
+    principal = person(subject=principal.subject, mfa=False)
     sign_in(client, issuer, principal)
     created = client.post("/api/v1/tasks", json=proposal())
     assert created.status_code == 201, created.text

@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+- Preserve precise terminal integrity classification when the safety tick retires
+  malformed inspection evidence. Legacy proposal corruption remains
+  `proposal_integrity`; malformed inspection extensions become
+  `inspection_integrity`, with original journal bytes preserved. Regression
+  tests also assert that expired proposals are terminally cancelled before any
+  approval attempt and that MFA step-up works after a prior MFA-authorized reset.
+
 - Support native same-account Onesa MFA step-up for simulation approval and
   Stop reset. The native client refreshes its rotated product session/CSRF only
   after backend verification; regressions reject a different subject or a

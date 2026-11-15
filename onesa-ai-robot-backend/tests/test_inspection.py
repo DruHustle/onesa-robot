@@ -469,7 +469,11 @@ def test_expired_and_changed_execution_conditions_invalidate_approval(api):
         f"/api/v1/missions/{detail['id']}/approve",
         json={"password": PASSWORD, "expected_plan_sha256": detail["record"]["plan_sha256"]},
     )
-    assert response.status_code == 422
+    assert response.status_code == 409
+    expired = api.get(f"/api/v1/missions/{detail['id']}").json()
+    assert expired["state"] == "cancelled"
+    assert expired["record"]["outcome"] == "interrupted"
+    assert expired["record"]["events"][-1]["detail"] == "proposal_expired"
     assert api.get("/api/v1/status").json()["active_task"] is None
     second = plan(api)
     api.portal.call(lambda: setattr(api.app.state.sim, "position", 0.2))

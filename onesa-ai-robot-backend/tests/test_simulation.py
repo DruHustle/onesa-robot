@@ -245,8 +245,12 @@ def test_approval_rechecks_staleness_and_owner(api):
 
     api.portal.call(replace_proposal)
     assert (
-        api.post(f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD}).status_code == 422
+        api.post(f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD}).status_code == 409
     )
+    expired_task = next(
+        task for task in api.get("/api/v1/tasks").json()["tasks"] if task["id"] == task_id
+    )
+    assert (expired_task["state"], expired_task["reason"]) == ("cancelled", "proposal_expired")
 
     def change_owner():
         sim.db.execute("UPDATE tasks SET owner='different-operator' WHERE id=?", (task_id,))
