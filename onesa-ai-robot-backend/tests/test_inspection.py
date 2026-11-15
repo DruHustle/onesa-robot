@@ -225,9 +225,7 @@ def test_corrupt_inspection_record_cannot_prevent_operator_stop(api, phase):
 
     def corrupt_journal():
         sim = api.app.state.sim
-        sim.db.execute(
-            "UPDATE tasks SET proposal=? WHERE id=?", (corrupt, detail["id"])
-        )
+        sim.db.execute("UPDATE tasks SET proposal=? WHERE id=?", (corrupt, detail["id"]))
         sim.db.commit()
 
     api.portal.call(corrupt_journal)
