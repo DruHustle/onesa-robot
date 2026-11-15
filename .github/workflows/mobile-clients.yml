@@ -37,6 +37,7 @@ jobs:
     env:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_ROBOT_API_ORIGIN: https://onesa-ai-robot-backend-staging.onrender.com
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -61,6 +62,7 @@ jobs:
           ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon --console=plain
           apk=app/build/outputs/apk/release/app-release.apk
           unzip -l "$apk" | grep 'assets/index.android.bundle'
+          unzip -p "$apk" assets/index.android.bundle | grep -aF "$EXPO_PUBLIC_ROBOT_API_ORIGIN" >/dev/null
           mkdir -p "$RUNNER_TEMP/native"
           cp "$apk" "$RUNNER_TEMP/native/internal-test.apk"
           cd "$RUNNER_TEMP/native"
@@ -121,6 +123,8 @@ jobs:
           xcrun simctl bootstatus "$udid" -b
           xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Release -destination "platform=iOS Simulator,id=$udid" -derivedDataPath "$RUNNER_TEMP/build" CODE_SIGNING_ALLOWED=NO build
           app=$(find "$RUNNER_TEMP/build/Build/Products/Release-iphonesimulator" -maxdepth 1 -type d -name '*.app' -print -quit)
+          test -n "$app" && test -f "$app/main.jsbundle"
+          grep -aF "$EXPO_PUBLIC_ROBOT_API_ORIGIN" "$app/main.jsbundle" >/dev/null
           xcrun simctl install "$udid" "$app"
           xcrun simctl launch "$udid" eu.onesa.robot
           mkdir -p "$RUNNER_TEMP/native"
