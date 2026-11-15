@@ -1,4 +1,25 @@
-export const ORIGIN = 'https://robot.onesa.eu';
+const PRODUCTION_API_ORIGIN = 'https://robot.onesa.eu';
+
+// Expo inlines EXPO_PUBLIC_* values into the native bundle at build time.
+// Restrict the value to a bare HTTPS Onesa origin so a staging build cannot
+// silently call production and a typo cannot redirect session cookies/CSRF.
+export function resolveApiOrigin(value) {
+  if (value === undefined || value === null || value === '') return PRODUCTION_API_ORIGIN;
+  if (typeof value !== 'string') throw new Error('Robot API origin must be an HTTPS Onesa origin.');
+  let url;
+  try { url = new URL(value); }
+  catch { throw new Error('Robot API origin must be an HTTPS Onesa origin.'); }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== 'https:' || url.username || url.password ||
+      (url.pathname !== '' && url.pathname !== '/') || url.search || url.hash ||
+      (host !== 'onesa.eu' && !host.endsWith('.onesa.eu')) ||
+      (url.port && url.port !== '443')) {
+    throw new Error('Robot API origin must be a bare HTTPS origin under onesa.eu.');
+  }
+  return url.origin;
+}
+
+export const ORIGIN = resolveApiOrigin(process.env.EXPO_PUBLIC_ROBOT_API_ORIGIN);
 export const CALLBACK = 'onesarobot://account/callback';
 export const AUTH = '/auth/identity';
 export const PRODUCT = 'robot';
