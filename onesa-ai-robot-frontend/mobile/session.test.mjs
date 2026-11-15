@@ -27,6 +27,7 @@ test('Stop can complete before an unrelated operator mutation and verifies the a
     if (path === '/tasks') return stuckMutation;
     if (path === '/stop') return {status:'stopped', physical_actuation:false};
     if (path === '/status') return {stopped:true, active_task:null, physical_actuation:false};
+    if (path === '/tasks') return {tasks:[{state:'cancelled'}]};
     if (path === '/humanoid/state') return {connection:'simulated_actuators', stopped:true, active_command:null, pending:null, physical_actuation:false};
     throw Error('Unexpected endpoint');
   };
@@ -42,20 +43,25 @@ test('Stop can complete before an unrelated operator mutation and verifies the a
 test('Stop fails closed if the backend does not acknowledge the safety state', async () => {
   const safe = {status:'stopped', physical_actuation:false};
   const idle = {stopped:true, active_task:null, physical_actuation:false};
+  const terminalHistory = {tasks:[{state:'cancelled'},{state:'completed'}]};
   const whole = {connection:'simulated_actuators', stopped:true, active_command:null, pending:null, physical_actuation:false};
-  for (const [label, ack, status, humanoid, count] of [
-    ['missing acknowledgement', {}, undefined, undefined, 1],
-    ['falsified physical flag', {status:'stopped', physical_actuation:true}, undefined, undefined, 1],
-    ['still active', safe, {stopped:true, active_task:'running', physical_actuation:false}, undefined, 2],
-    ['latch not set', safe, {stopped:false, active_task:null, physical_actuation:false}, undefined, 2],
-    ['physical flag uncertain', safe, {stopped:true, active_task:null}, undefined, 2],
-    ['readback unavailable', safe, new Error('offline'), undefined, 2],
-    ['whole-body active', safe, idle, {...whole,active_command:'in-flight'}, 3],
-    ['whole-body pending', safe, idle, {...whole,pending:{id:'proposed'}}, 3],
-    ['whole-body fault', safe, idle, new Error('fault'), 3],
-    ['faulted humanoid readback', safe, idle, {...whole, connection:'simulator_fault'}, 3],
-    ['missing humanoid connection', safe, idle, {...whole, connection:undefined}, 3],
-    ['whole-body physical flag uncertain', safe, idle, {...whole,physical_actuation:undefined}, 3],
+  for (const [label, ack, status, history, humanoid, count] of [
+    ['missing acknowledgement', {}, undefined, undefined, undefined, 1],
+    ['falsified physical flag', {status:'stopped', physical_actuation:true}, undefined, undefined, undefined, 1],
+    ['still active', safe, {stopped:true, active_task:'running', physical_actuation:false}, undefined, undefined, 2],
+    ['latch not set', safe, {stopped:false, active_task:null, physical_actuation:false}, undefined, undefined, 2],
+    ['physical flag uncertain', safe, {stopped:true, active_task:null}, undefined, undefined, 2],
+    ['status readback unavailable', safe, new Error('offline'), undefined, undefined, 2],
+    ['history still contains a running task', safe, idle, {tasks:[{state:'running'}]}, undefined, 3],
+    ['history still contains a proposal', safe, idle, {tasks:[{state:'proposed'}]}, undefined, 3],
+    ['history missing', safe, idle, {}, undefined, 3],
+    ['history unavailable', safe, idle, new Error('journal unavailable'), undefined, 3],
+    ['whole-body active', safe, idle, terminalHistory, {...whole,active_command:'in-flight'}, 4],
+    ['whole-body pending', safe, idle, terminalHistory, {...whole,pending:{id:'proposed'}}, 4],
+    ['whole-body fault', safe, idle, terminalHistory, new Error('fault'), 4],
+    ['faulted humanoid readback', safe, idle, terminalHistory, {...whole, connection:'simulator_fault'}, 4],
+    ['missing humanoid connection', safe, idle, terminalHistory, {...whole, connection:undefined}, 4],
+    ['whole-body physical flag uncertain', safe, idle, terminalHistory, {...whole,physical_actuation:undefined}, 4],
   ]) {
     const seen = [];
     const api = async path => {
@@ -64,6 +70,10 @@ test('Stop fails closed if the backend does not acknowledge the safety state', a
       if (path === '/status') {
         if (status instanceof Error) throw status;
         return status;
+      }
+      if (path === '/tasks') {
+        if (history instanceof Error) throw history;
+        return history;
       }
       if (path === '/humanoid/state') {
         if (humanoid instanceof Error) throw humanoid;
