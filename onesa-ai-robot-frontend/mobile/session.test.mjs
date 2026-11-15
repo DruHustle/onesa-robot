@@ -33,9 +33,10 @@ test('native sign-in supports same-account MFA step-up', async () => {
     assert.equal(authorize, url);
     assert.equal(callback, CALLBACK);
     return {type:'success', url:CALLBACK+'?state='+state+'&code=mfa-code'};
-  }, api, {stepUp:true});
+  }, api, {stepUp:true, csrf:'synthetic-session-csrf'});
   assert.deepEqual(result, {signed_in:true});
   assert.deepEqual(seen[0].options.body, {mobile:true, step_up:true});
+  assert.equal(seen[0].options.csrf, 'synthetic-session-csrf');
   assert.equal(seen[1].path, AUTH + '/mobile/exchange');
 });
 
@@ -109,4 +110,13 @@ test('Stop fails closed if the backend does not acknowledge the safety state', a
     assert.equal(seen[0], '/stop');
   }
   await assert.rejects(stopSimulation('', () => {throw Error('Should not reach API');}), /Sign in/);
+});
+
+test('native MFA step-up refuses to start without the current session CSRF proof', async () => {
+  let called = false;
+  await assert.rejects(
+    signIn(async () => ({type:'cancel'}), async () => { called = true; }, {stepUp:true}),
+    /Refresh your operator session/
+  );
+  assert.equal(called, false);
 });
