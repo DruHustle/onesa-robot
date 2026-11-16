@@ -188,6 +188,19 @@ def test_config_is_public_and_legacy_credentials_do_not_bypass_identity(environm
     assert "bearer" not in str(result)
 
 
+def test_native_account_id_is_stable_across_display_changes_and_distinct_subjects(environment):
+    _, client, issuer, _ = environment
+    original = person()
+    first = sign_in(client, issuer, original)
+    assert first["id"].startswith("robot_") and len(first["id"]) == 70
+    changed = replace(original, name="Renamed Operator", email="renamed@example.test")
+    second = sign_in(client, issuer, changed)
+    assert second["name"] == changed.name and second["id"] == first["id"]
+    third = sign_in(client, issuer, replace(original, subject=str(uuid4())))
+    assert third["name"] == first["name"] and third["id"] != first["id"]
+    assert original.subject not in first["id"] and original.email not in first["id"]
+
+
 @pytest.mark.parametrize(
     "failure",
     [

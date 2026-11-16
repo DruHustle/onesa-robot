@@ -9,7 +9,7 @@
     "ios": "expo run:ios",
     "prebuild": "expo prebuild --clean --no-install --template ./node_modules/expo/template.tgz",
     "bundle": "expo export --platform android --platform ios",
-    "test": "node --test session.test.mjs"
+    "test": "node --test *.test.mjs"
   },
   "dependencies": {
     "expo": "57.0.31",

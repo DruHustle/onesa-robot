@@ -32,11 +32,48 @@ operation never overrides the server's stop epoch, access grants or task
 ownership. The native UI performs same-account Onesa MFA step-up in the system browser
 before approval or Stop reset when the current confirmation has expired. The
 backend verifies the original subject and a fresh MFA assertion before rotating
-the product session and CSRF token. Continuous native running-task supervision
-is still incomplete. Only the backend's bounded simulator and watchdog are
-exercised; native availability and production identity/provider acceptance
-remain separate release blockers.
+the product session and CSRF token. After browser MFA, the operator reviews the
+fresh state and explicitly confirms again; the earlier operation is not replayed.
+Native availability and production identity/provider acceptance remain separate
+release gates.
 No hardware, ROS actuation or store submission is authorized by this UI.
+
+## Foreground supervision and account-bound return
+
+While active, the client reads the current account, status, owned task history and
+independent humanoid state in one non-overlapping observation batch. Only a complete
+observation less than 1.5 seconds old permits ordinary mutations. A heartbeat is
+sent only for the current operator's observed running joint task; it never renews
+a humanoid command. Subsequent reads begin after 500 milliseconds. Missing,
+contradictory, late or failed reads lock controls and suspend supervision. Moving
+the app into the background (or losing Android window focus) immediately invalidates observations and pending UI
+intents. The independent backend watchdog stops a task when supervision is lost;
+returning to the app reads current state and never replays or resumes that task.
+
+Stop remains independent of a stalled ordinary request. Its generation change
+also prevents a delayed proposal or approval response from restoring old controls.
+Session expiry clears private task data; role changes are taken from each fresh
+authenticated observation. Reset requires an observed stopped simulator with no
+active command, pending humanoid proposal or nonterminal journal row. The backend
+rechecks those conditions after confirmation and identity waits, including its
+existing Stop generation fence.
+
+The additive `/auth/me` and legacy-login response `id` is an opaque stable Robot
+account key. In managed mode it derives from the existing issuer/mapping-namespace
+and stable subject ownership hash; display name and email are not linking keys.
+The mobile client requires this field and fails closed against an older backend,
+so qualify the backend contract before rolling out the new client. Existing task
+owners and session rows are unchanged. The old unbound SecureStore `csrf` entry is
+deleted at startup, and every CSRF proof comes from the current authenticated API.
+
+An exact `onesarobot://tasks/<UUID>` link selects only a task returned by the
+authenticated owned-history endpoint. SecureStore retains a selected task together
+with its stable account key. Expiry and a same-account sign-in restore that exact
+task; an account switch clears it even when display names match. Unknown task IDs
+remain unavailable. Explicit sign-out clears the selection and stores a local
+signed-out marker, so restart cannot silently restore a session whose network
+logout failed. Only deliberate sign-in clears that marker. Provider SSO termination
+remains a separate backend-reported capability.
 
 Every native API request has its own ten-second deadline, including reading its
 JSON response. A stalled request is aborted and reported as unverified; it never
@@ -46,7 +83,13 @@ that the server cancelled an operation: refresh the current state before trying
 again. The network regression uses actual cancellation signals to cover a hung
 mutation and body read while an independent Stop completes and remains verified.
 
-Run `npm test` for pure native network/Stop regressions. Required before
+Run `npm test` for native network, lifecycle, account-bound return, MFA, observation
+and Stop regressions. `tests/test_native_operator.py` in the backend starts a
+disposable real HTTP application and signed synthetic issuer, then runs the same
+native controller through MFA, completion, background watchdog cancellation,
+in-flight Stop, offline denial, expiry, restoration, viewer denial and logout. Its
+storage adapter is in memory; it does not qualify native Keychain, browser UI or a
+physical device. Required before
 GO: full pinned Android/iOS builds, installed-device Stop during an in-flight
 request, fresh/signed-out sign-in and deep-link return, actual MFA approval,
 offline readback failure, role-denied mutation, session expiry and independent

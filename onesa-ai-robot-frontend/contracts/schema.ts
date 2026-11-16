@@ -2161,6 +2161,11 @@ export interface components {
              * @default false
              */
             global_administrator: boolean;
+            /**
+             * Id
+             * @description Opaque stable Robot account identity; display name is not an ownership key.
+             */
+            id: string;
             /** Name */
             name: string;
             /**
