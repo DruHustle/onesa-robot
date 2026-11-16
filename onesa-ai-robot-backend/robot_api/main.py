@@ -255,6 +255,10 @@ class MissionCatalog(BaseModel):
 
 
 class SessionResponse(BaseModel):
+    id: str = Field(
+        pattern=r"^robot_[0-9a-f]{64}$",
+        description="Opaque stable Robot account identity; display name is not an ownership key.",
+    )
     csrf: str
     name: str
     role: Literal["viewer", "operator", "administrator"] = "operator"
@@ -1659,11 +1663,23 @@ def create_app(
             samesite="strict",
             path="/api/v1",
         )
-        return {"csrf": csrf, "name": value.name, "role": role({"name": value.name})}
+        return {
+            "id": account_id(value.name),
+            "csrf": csrf,
+            "name": value.name,
+            "role": role({"name": value.name}),
+        }
+
+    def account_id(owner: str) -> str:
+        # Managed session names are the existing issuer/subject ownership hash,
+        # not display names or email. Keep that namespace and existing journal
+        # ownership intact while exposing a product-scoped opaque client key.
+        return "robot_" + hashlib.sha256(("robot-account-v1\x00" + owner).encode()).hexdigest()
 
     @app.get("/api/v1/auth/me", response_model=SessionResponse)
     async def me(operator: Operator):
         return {
+            "id": account_id(operator["name"]),
             "csrf": operator["csrf"],
             "name": operator.get("display_name", operator["name"]),
             "role": role(operator),
@@ -2221,7 +2237,16 @@ def create_app(
             raise HTTPException(503, "Remote simulation journal requires recovery")
         if sim.stop_epoch != stop_epoch:
             raise HTTPException(409, "Stop changed during reset confirmation")
-        if sim.active or sim.humanoid.active or sim.humanoid.pending:
+        if not sim.stopped:
+            raise HTTPException(409, "Simulator is not stopped")
+        if (
+            sim.active
+            or sim.humanoid.active
+            or sim.humanoid.pending
+            or sim.db.execute(
+                "SELECT count(*) FROM tasks WHERE state IN ('proposed','running')"
+            ).fetchone()[0]
+        ):
             raise HTTPException(409, "Cancel the current task first")
         sim.humanoid.verified_positions()
         sim.db.execute("UPDATE safety SET stopped=0 WHERE id=1")

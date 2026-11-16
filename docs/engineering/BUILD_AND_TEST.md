@@ -1,5 +1,25 @@
 # Independent software builds and tests
 
+## Native foreground supervision and account identity
+
+Run `npm test` in `onesa-ai-robot-frontend/mobile` with Node 24. Its controller
+regressions cover non-overlapping observations, foreground and freshness fences,
+independent Stop, stale mutation responses, account/role changes, MFA re-confirmation,
+offline denial and protected task return. The backend's `tests/test_native_operator.py`
+uses real loopback HTTP, a live simulator/watchdog, nonce/PKCE-bound RSA-signed
+synthetic assertions and the actual native controller. It verifies task completion,
+background and offline cancellation, in-flight Stop, expiry, same-account return,
+viewer denial and logout. It never contacts a real issuer and does not establish
+installed browser, Keychain, hardware or store acceptance. The Linux backend CI job
+installs the same pinned Node 24 toolchain for this mandatory integration case.
+
+`test_shared_identity.py` requires the opaque account ID to survive display/email
+changes while distinguishing subjects. `test_simulation.py` rejects reset while
+already ready or while persisted proposed/running rows exist without an in-memory
+task. Those four regressions fail against the preceding source. Existing concurrent
+Stop/reset, session/MFA and journal failure tests remain required. Regenerate both
+OpenAPI and TypeScript contracts from the backend before publication.
+
 ## Owner-local journal recovery regression
 
 `tests/test_owner_recovery.py` exercises the existing SQL ownership fence through

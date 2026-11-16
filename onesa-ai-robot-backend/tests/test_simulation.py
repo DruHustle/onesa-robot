@@ -145,6 +145,36 @@ def test_watchdog_stops_and_does_not_resume_after_reconnection(api):
     assert api.get("/api/v1/status").json()["active_task"] is None
 
 
+def test_reset_requires_an_already_stopped_simulator(api):
+    login(api)
+    reset(api)
+    before = api.get("/api/v1/status").json()
+    response = api.post("/api/v1/reset", json={"password": PASSWORD})
+    assert response.status_code == 409
+    after = api.get("/api/v1/status").json()
+    assert after["stopped"] is False and after["active_task"] == before["active_task"]
+
+
+@pytest.mark.parametrize("pending_state", ["proposed", "running"])
+def test_reset_rejects_persisted_nonterminal_history_without_an_active_task(api, pending_state):
+    login(api)
+    reset(api)
+    task_id = api.post("/api/v1/tasks", json=proposal()).json()["id"]
+    assert api.post("/api/v1/stop").status_code == 200
+
+    def retain_unacknowledged_row():
+        sim = api.app.state.sim
+        assert sim.stopped and sim.active is None
+        sim.db.execute("UPDATE tasks SET state=? WHERE id=?", (pending_state, task_id))
+        sim.db.commit()
+
+    api.portal.call(retain_unacknowledged_row)
+    response = api.post("/api/v1/reset", json={"password": PASSWORD})
+    assert response.status_code == 409
+    assert api.get("/api/v1/status").json()["stopped"] is True
+    assert api.get("/api/v1/tasks").json()["tasks"][0]["state"] == pending_state
+
+
 @pytest.mark.parametrize("method,path", [("GET", "/api/v1/status"), ("POST", "/api/v1/heartbeat")])
 def test_requests_revoke_expired_authority_when_background_tick_is_delayed(
     api, monkeypatch, method, path
