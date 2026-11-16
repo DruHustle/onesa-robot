@@ -2697,6 +2697,12 @@
             "title": "Global Administrator",
             "type": "boolean"
           },
+          "id": {
+            "description": "Opaque stable Robot account identity; display name is not an ownership key.",
+            "pattern": "^robot_[0-9a-f]{64}$",
+            "title": "Id",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -2713,6 +2719,7 @@
           }
         },
         "required": [
+          "id",
           "csrf",
           "name"
         ],
