@@ -3,6 +3,10 @@ import {RobotClient} from './client.js';
 const client = new RobotClient();
 const $ = id => document.getElementById(id);
 const panel = $('humanoid');
+window.addEventListener('onesa:stop-requested',()=>{
+  ++epoch;client.cancelPending();reading=false;busy=false;observation=null;review(null);haltRequired=true;controls();
+});
+window.addEventListener('onesa:stop-verified',()=>{if(panel.open)void refresh(true);});
 let epoch = 0, model = null, observation = null, busy = false, reading = false;
 let supervising = false, haltRequired = false, stopping = null, reviewedPlan = null;
 const label = value => value.replaceAll('_', ' ');
@@ -31,9 +35,9 @@ function draw(positions) {
   $('humanoid-links').replaceChildren(...nodes);
 }
 function controls() {
-  const available=Boolean(model&&observation&&!busy&&!stopping&&!haltRequired&&!document.hidden&&client.canConfirm());
+  const available=Boolean(model&&observation?.connection==='simulated_actuators'&&!busy&&!stopping&&!haltRequired&&!document.hidden&&client.canConfirm());
   const occupied=Boolean(observation?.pending||observation?.active_command);
-  $('humanoid-propose').disabled=!available||occupied||observation.stopped||observation.connection!=='simulated_actuators';
+  $('humanoid-propose').disabled=!available||occupied||observation.stopped;
   $('humanoid-approve').disabled=!available||!observation?.pending||observation.stopped;
   $('humanoid-approval').hidden=!observation?.pending;
   const locked=!available||occupied;
@@ -45,6 +49,7 @@ function review(plan) {
   if(reviewedPlan===plan?.plan_sha256)return;
   reviewedPlan=plan?.plan_sha256;
   $('humanoid-password').value='';
+  $('humanoid-password-confirmed').checked=false;
   $('humanoid-plan').textContent=plan?`${Object.keys(plan.request.targets).length} joint targets over ${plan.request.duration_seconds} seconds. Confirm the exact start and target values below; Stop to discard this plan.`:'';
   $('humanoid-plan-values').replaceChildren();
   if(!plan)return;
@@ -62,6 +67,7 @@ function clear() {
   epoch++;client.cancelPending();client.csrf='';model=observation=null;busy=reading=false;reviewedPlan=null;
   $('humanoid-joints').replaceChildren();$('humanoid-links').replaceChildren();
   $('humanoid-plan').textContent='';$('humanoid-plan-values').replaceChildren();$('humanoid-password').value='';
+  $('humanoid-password-confirmed').checked=false;
   $('humanoid-state').textContent='Open this panel while signed in to load the reference model.';
   controls();
 }
@@ -101,7 +107,7 @@ async function refresh(force=false) {
     if(!verified(value))throw new Error('Humanoid telemetry could not be verified.');
     // Renew only this command after successfully observing it in its owning
     // session. The rest of the console cannot keep unobserved motion alive.
-    if(value.active_command&&value.owns_active&&!haltRequired)await client.humanoidHeartbeat(value.active_command);
+    if(value.connection==='simulated_actuators'&&!value.stopped&&value.active_command&&value.owns_active&&!haltRequired)await client.humanoidHeartbeat(value.active_command);
     if(current!==epoch)return;
     observation=value;
     supervising=Boolean(value.pending||value.owns_active);
@@ -112,7 +118,7 @@ async function refresh(force=false) {
   } catch(error) {
     if(current!==epoch)return;
     if(supervising)haltRequired=true;
-    observation=null;review(null);controls();
+    observation=null;$('humanoid-links').replaceChildren();review(null);controls();
     $('humanoid-state').textContent='Telemetry unavailable; heartbeat paused. Stop remains available.';
     if(error.status===401)depart();
   } finally {if(current===epoch)reading=false;}
@@ -144,24 +150,31 @@ function stop(keepalive=false) {
   if(stopping)return stopping;
   haltRequired=true;
   const stopper=new RobotClient();stopper.csrf=client.csrf;
+  let verified=false;
   stopping=stopper.stop(keepalive).then(value=>{
-    if(value.status!=='stopped')throw new Error('Stop acknowledgement could not be verified.');
+    if(value.status!=='stopped'||value.physical_actuation!==false)throw new Error('Stop acknowledgement could not be verified.');
     supervising=false;
-  }).finally(()=>{stopping=null;controls();});
+    verified=!keepalive;
+  }).finally(()=>{
+    stopping=null;controls();
+    if(verified)window.dispatchEvent(new Event('onesa:stop-verified'));
+  });
   controls();return stopping;
 }
 $('humanoid-stop').addEventListener('click',()=>{
-  const current=++epoch;client.cancelPending();reading=false;busy=false;
-  observation=null;review(null);
-  void stop().then(()=>current===epoch&&refresh()).catch(error=>{if(current===epoch)$('humanoid-state').textContent=error.message;});
+  window.dispatchEvent(new Event('onesa:stop-requested'));
+  void stop().catch(error=>{$('humanoid-state').textContent=error.message;});
 });
 $('humanoid-neutral').addEventListener('click',()=>{for(const input of $('humanoid-joints').querySelectorAll('input'))input.value='0';});
 function depart() {
   // Include unresolved mutations and stale observations: aborting a fetch does
   // not undo a proposal or approval that the server has already accepted.
-  if(client.csrf&&(supervising||busy||haltRequired))void stop(true).catch(()=>{
-    $('notice').textContent='Humanoid Stop could not be confirmed. Its supervision heartbeat is paused; verify the stopped state after reconnecting.';
-  });
+  if(client.csrf&&(supervising||busy||haltRequired)){
+    window.dispatchEvent(new Event('onesa:stop-requested'));
+    void stop(true).catch(()=>{
+      $('notice').textContent='Humanoid Stop could not be confirmed. Its supervision heartbeat is paused; verify the stopped state after reconnecting.';
+    });
+  }
   clear();
 }
 panel.addEventListener('toggle',()=>{if(panel.open)void load();else depart();});

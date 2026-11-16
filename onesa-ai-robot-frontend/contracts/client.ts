@@ -18,12 +18,17 @@ export class RobotClient {
  csrf = '';
  authenticationMethod: 'operator' | 'onesa' = 'operator';
  canOperate = true;
+ supervisionPaused = false;
  confirmationExpires = 0;
  canConfirm(){return this.canOperate&&(this.authenticationMethod!=='onesa'||this.confirmationExpires>Date.now()/1000);}
  confirmation(password:string,confirmed:boolean):Confirmation{return this.authenticationMethod==='onesa'?{...(confirmed?{confirmed:true as const}:{})}:{password};}
  pending = new AbortController();
  cancelPending(){this.pending.abort();this.pending=new AbortController();}
  async request<T>(path:string,body?:unknown,keepalive=false):Promise<T> {
+  if(body!==undefined&&this.supervisionPaused){
+   const safeWhilePaused=path===routes.stop||path===routes.login||path===routes.logout||path===routes.identityStart||path===routes.blockPhysical||/^\/api\/v1\/tasks\/[^/]+\/cancel$/.test(path);
+   if(!safeWhilePaused)throw new Error('Stop state is not verified; supervision remains paused. Use Stop again before continuing.');
+  }
   const lifecycle=this.pending.signal,request=new AbortController();
   const cancel=()=>request.abort();
   lifecycle.addEventListener('abort',cancel,{once:true});
@@ -62,7 +67,25 @@ export class RobotClient {
  proposeHumanoid(value:components['schemas']['MotionRequest']){return this.request<components['schemas']['MotionPlan']>(routes.humanoidPropose,value);}
  approveHumanoid(id:string,value:components['schemas']['MissionConfirmation']){return this.request<components['schemas']['MotionPlan']>(routes.humanoidApprove.replace('{command_id}',encodeURIComponent(id)),value);}
  humanoidHeartbeat(command_id:string){return this.request<components['schemas']['ActionResponse']>(routes.humanoidHeartbeat,{command_id});}
- stop(keepalive=false){return this.request<components['schemas']['ActionResponse']>(routes.stop,{},keepalive);}
+ async stop(keepalive=false){
+  this.supervisionPaused=true;
+  const acknowledgement=await this.request<components['schemas']['ActionResponse']>(routes.stop,{},keepalive);
+  if(acknowledgement?.status!=='stopped'||acknowledgement.physical_actuation!==false)
+   throw new Error('Stop acknowledgement could not be verified; supervision remains paused.');
+  if(keepalive)return acknowledgement;
+  try{
+   const [status,history,humanoid]=await Promise.all([this.status(),this.tasks(),this.humanoidState()]);
+   if(status?.mode!=='simulation'||status.physical_actuation!==false||status.stopped!==true||status.active_task!==null||
+      !Array.isArray(history?.tasks)||!history.tasks.every(task=>['completed','cancelled'].includes(task.state))||
+      humanoid?.mode!=='simulation'||humanoid.connection!=='simulated_actuators'||humanoid.physical_actuation!==false||
+      humanoid.stopped!==true||humanoid.active_command!==null||humanoid.pending!==null)
+    throw new Error('Contradictory Stop readback');
+  }catch{
+   throw new Error('Stop could not be verified; supervision remains paused. Use Stop again after checking the simulator.');
+  }
+  this.supervisionPaused=false;
+  return acknowledgement;
+ }
  reset(value:Confirmation){return this.request<components['schemas']['ActionResponse']>(routes.reset,value);}
  physicalPermission(){return this.request<components['schemas']['PhysicalPermissionResponse']>(routes.physicalPermission);}
  allowPhysical(value:components['schemas']['PhysicalPermissionConfirmation']){return this.request<components['schemas']['PhysicalPermissionResponse']>(routes.allowPhysical,value);}

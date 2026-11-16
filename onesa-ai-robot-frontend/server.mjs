@@ -22,7 +22,7 @@ const port = Number(process.env.PORT || 3431);
 const upstream = new URL(process.env.ROBOT_API_URL || 'http://127.0.0.1:8431');
 if (!['http:', 'https:'].includes(upstream.protocol) || upstream.username || upstream.password || upstream.pathname !== '/' || upstream.search || upstream.hash) throw new Error('ROBOT_API_URL must be a credential-free HTTP(S) origin');
 if (upstream.protocol === 'http:' && !['127.0.0.1', 'localhost', 'backend'].includes(upstream.hostname)) throw new Error('Remote gateway requires TLS');
-const routes = /^\/api\/v1\/(edge\/audit|health|ready|auth\/(login|logout|me|identity\/(config|start|callback))|admin\/physical-operation(?:\/(allow|block))?|missions(?:\/(?:catalog|context|[a-f0-9-]{36}(?:\/(?:approve|export))?))?|humanoid\/(?:model(?:\.urdf)?|state|heartbeat|proposals(?:\/[a-f0-9-]{36}\/approve)?)|status|tasks(?:\/[a-f0-9-]{36}\/(approve|cancel))?|heartbeat|stop|reset)$/;
+const routes = /^\/api\/v1\/(edge\/audit|health|ready|auth\/(login|logout|me|identity\/(config|start|callback|mobile\/exchange))|admin\/physical-operation(?:\/(allow|block))?|missions(?:\/(?:catalog|context|[a-f0-9-]{36}(?:\/(?:approve|export))?))?|humanoid\/(?:model(?:\.urdf)?|state|heartbeat|proposals(?:\/[a-f0-9-]{36}\/approve)?)|status|tasks(?:\/[a-f0-9-]{36}\/(approve|cancel))?|heartbeat|stop|reset)$/;
 const security = {
   'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
@@ -53,7 +53,9 @@ export async function handler(req, res) {
       const cookies=response.headers.getSetCookie().filter(x=>/^robot_session=/.test(x)||identityRoute&&/^robot_identity=/.test(x));
       if (response.status >= 300 && response.status < 400) {
         const location=response.headers.get('location');
-        if(identityCallback&&response.status===303&&['/console','/console?identity=failed','/console?identity=access','/console?identity=unavailable'].includes(location)){
+        const mobile = identityCallback && req.method === 'GET' && response.status === 303 &&
+          /^onesarobot:\/\/account\/callback\?state=native_[a-zA-Z0-9_-]{43}&(?:code=[^&#]+|error=cancelled)$/.test(location || '');
+        if(mobile || (identityCallback&&response.status===303&&['/console','/console?identity=failed','/console?identity=access','/console?identity=unavailable'].includes(location))){
           if(cookies.length)res.setHeader('Set-Cookie',cookies);
           res.writeHead(303,{Location:location}).end();return;
         }

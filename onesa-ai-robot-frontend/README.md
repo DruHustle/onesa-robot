@@ -13,6 +13,13 @@ operations. The UI then requires an explicit review checkbox for each exact plan
 reset or permission change. It never submits an operation during sign-in. Viewers
 receive a read-only workspace with Stop and sign-out still available.
 
+The administrator panel reads permission independently of simulator status. It
+clears the confirmation when the permission revision changes and shows all four
+fields as unavailable when the permission read fails. Block remains available
+during that outage. After Allow or Block the console reads the current server
+state again. A humanoid actuator fault disables proposal and approval, and loss
+of joint feedback clears the displayed pose.
+
 **Sign out of Onesa** removes local authority first and asks the central service to
 end the account's sessions across applications. If that request is unavailable, the
 UI reports local sign-out and directs the user to finish central sign-out; it does

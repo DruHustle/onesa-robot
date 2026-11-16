@@ -5,8 +5,8 @@ import {spawn} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {readFile} from 'node:fs/promises';
 test('proxy preserves auth boundaries, strips unrelated secrets and rejects open routes',async()=>{
- let received;
- const upstream=http.createServer((req,res)=>{received=req.headers;res.setHeader('Content-Type','application/json');res.setHeader('Set-Cookie',['robot_session=fixture; Path=/api/v1; HttpOnly','unrelated=secret']);res.end('{}');});
+ let received,receivedUrl;
+ const upstream=http.createServer((req,res)=>{received=req.headers;receivedUrl=req.url;res.setHeader('Content-Type','application/json');res.setHeader('Set-Cookie',['robot_session=fixture; Path=/api/v1; HttpOnly','unrelated=secret']);res.end('{}');});
  await new Promise(resolve=>upstream.listen(0,'127.0.0.1',resolve));
  const child=spawn(process.execPath,['--input-type=module','-e',"import http from 'node:http';import gateway from './api/gateway.mjs';const server=http.createServer(gateway);server.listen(3439,'127.0.0.1');process.on('SIGTERM',()=>server.close(()=>process.exit(0)));"],{env:{...process.env,PORT:'3439',ROBOT_API_URL:`http://127.0.0.1:${upstream.address().port}`},stdio:'ignore'});
  try {
@@ -15,6 +15,19 @@ test('proxy preserves auth boundaries, strips unrelated secrets and rejects open
   assert.equal(response.status,200);assert.equal(received.cookie,'robot_session=fixture');assert.equal(received['x-vercel-protection-bypass'],undefined);assert.equal(received['x-forwarded-for'],undefined);assert.equal(response.headers.getSetCookie().length,1);
   assert.equal((await fetch('http://127.0.0.1:3439/api/v1/status?url=https://attacker.invalid')).status,404);
   assert.equal((await fetch('http://127.0.0.1:3439/api/v1/private')).status,404);
+  // Vercel invokes the rewritten function at /api/gateway, not at the
+  // browser's original /api/v1 path. Reconstruct the captured path and preserve
+  // only the caller's legitimate callback query parameters.
+  for (const [path,forwarded] of [
+    ['/api/gateway?__onesa_route=ready','/api/v1/ready'],
+    ['/api/gateway?__onesa_route=auth%2Fme','/api/v1/auth/me'],
+    ['/api/gateway?__onesa_route=humanoid%2Fmodel.urdf','/api/v1/humanoid/model.urdf'],
+    ['/api/gateway?__onesa_route=auth%2Fidentity%2Fcallback&code=synthetic&state=native_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&iss=https%3A%2F%2Fauth.onesa.eu','/api/v1/auth/identity/callback?code=synthetic&state=native_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&iss=https%3A%2F%2Fauth.onesa.eu']
+  ]) {
+    const response=await fetch('http://127.0.0.1:3439'+path);
+    assert.equal(response.status,200,path);
+    assert.equal(receivedUrl,forwarded,path);
+  }
   // Actual Vercel route metadata must support nested auth/task paths.
   assert.equal((await fetch('http://127.0.0.1:3439/api/v1/ready?__onesa_route=ready')).status,200);
   assert.equal((await fetch('http://127.0.0.1:3439/api/v1/auth/me?__onesa_route=auth%2Fme')).status,200);
@@ -42,7 +55,9 @@ test('proxy preserves auth boundaries, strips unrelated secrets and rejects open
     '/api/v1/status?__onesa_route=tasks',
     '/api/v1/status?__onesa_route=status&__onesa_route=status',
     '/api/v1/status?__onesa_route=status&url=https://attacker.invalid',
-    '/api/gateway?__onesa_route=status',
+    '/api/gateway?__onesa_route=../.env',
+    '/api/gateway?__onesa_route=%2e%2e%2f.env',
+    '/api/gateway?__onesa_route=status&__onesa_route=status',
     '/api/v1/private?__onesa_route=private'
   ]) assert.equal((await fetch('http://127.0.0.1:3439'+route)).status,404);
 

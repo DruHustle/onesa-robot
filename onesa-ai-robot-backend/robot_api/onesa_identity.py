@@ -44,6 +44,10 @@ class IdentityConfig:
     redirect_uri: str
     product: str
     allow_local_http: bool = False
+    audience: str = ""
+    public_jwks: str = ""
+    mapping_issuer: str = ""
+    account_url: str = ""
 
     def __post_init__(self) -> None:
         for name, value in (("issuer", self.issuer), ("callback", self.redirect_uri)):
@@ -60,7 +64,20 @@ class IdentityConfig:
                 or (parsed.scheme != "https" and not (local and parsed.scheme == "http"))
             ):
                 raise ValueError(f"Onesa identity {name} requires an exact trusted HTTPS URL")
-        if self.issuer.endswith("/"):
+        if self.audience:
+            from robot_api.managed_oidc import public_keys
+
+            if (
+                self.issuer != "https://" + urlsplit(self.issuer).netloc + "/"
+                or not self.mapping_issuer.startswith("https://")
+                or not self.audience.startswith("https://")
+                or not self.account_url.startswith("https://")
+            ):
+                raise ValueError(
+                    "Managed issuer, audience, mapping namespace and account URL required"
+                )
+            public_keys(self.public_jwks)
+        elif self.issuer.endswith("/") and not self.audience:
             raise ValueError("Onesa identity issuer must not end with a slash")
         if (
             not self.client_id
@@ -121,6 +138,10 @@ def authorization_url(
     }
     if reauthenticate:
         params.update(prompt="login", max_age="0", acr_values="urn:onesa:mfa")
+    if config.audience:
+        from robot_api.managed_oidc import authorize
+
+        return authorize(config, params, reauthenticate)
     return config.issuer + "/auth?" + urlencode(params)
 
 
@@ -219,6 +240,10 @@ def _strings(value: Any, allowed: set[str] | frozenset[str] | None = None) -> tu
 def validate_session(
     config: IdentityConfig, token: str, *, client: httpx.Client | None = None
 ) -> Identity:
+    if config.audience:
+        from robot_api.managed_oidc import validate
+
+        return validate(config, token)
     if not isinstance(token, str) or not 20 <= len(token) <= 4096:
         raise IdentityError("identity_rejected", "Your Onesa session is no longer valid")
     raw = _request(config, "/session", body={"token": token}, client=client)
@@ -312,6 +337,8 @@ def revoke_session(
     all_sessions: bool = False,
     client: httpx.Client | None = None,
 ) -> bool:
+    if config.audience:
+        return False  # Local sign-out cannot prove termination of the provider SSO session.
     body: dict[str, Any] = {"token": token}
     if all_sessions:
         body["all_sessions"] = True

@@ -263,6 +263,11 @@ def test_hosted_acceptance_executes_real_api_and_safety_flows(
                 else {}
             ),
         )
+        if not shared_identity:
+            assert result["status"] == "FAIL", result
+            assert result["failure"]["phase"] == "authentication"
+            assert not api.cookies.get("robot_session")
+            return
         assert result["status"] == "PASS", result
         assert all(value == "PASS" for value in result["checks"].values())
         assert result["physical_hardware_approved"] is False
