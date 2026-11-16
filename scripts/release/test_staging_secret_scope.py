@@ -7,6 +7,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from evidence import PRODUCT
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -37,7 +39,7 @@ class SecretScopeTests(unittest.TestCase):
                 env = {
                     "PATH": os.environ.get("PATH", ""),
                     "STAGING_SECRET_SCOPE": scope,
-                    "GITHUB_REPOSITORY": "DruHustle/" + ROOT.name,
+                    "GITHUB_REPOSITORY": "DruHustle/" + PRODUCT,
                 }
                 sentinel = "SYNTHETIC-NEVER-LOG-THIS-CREDENTIAL"
                 if supplied:
