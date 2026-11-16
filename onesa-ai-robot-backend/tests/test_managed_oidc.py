@@ -111,6 +111,13 @@ def test_mismatch_or_privilege_denied(signed, changes, profile):
         validate(config, json.dumps(pair(changes, profile)))
 
 
+@pytest.mark.parametrize("additional", [[], ["https://other-product.example"]])
+def test_resource_token_audience_must_be_one_exact_string(signed, additional):
+    config, _, pair = signed
+    with pytest.raises(IdentityError):
+        validate(config, json.dumps(pair({"aud": [config.audience, *additional]})))
+
+
 @pytest.mark.parametrize("mobile", [False, True])
 def test_console_callback_retains_the_legacy_owner_during_outage(
     tmp_path, monkeypatch, signed, mobile
