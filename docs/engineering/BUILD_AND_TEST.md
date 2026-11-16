@@ -1,5 +1,35 @@
 # Independent software builds and tests
 
+## Owner-local journal recovery regression
+
+`tests/test_owner_recovery.py` exercises the existing SQL ownership fence through
+the optional private interface: exact complete terminal history, last remaining
+attempt, session revocation, stale or changed proof, dirty/pending/physical state,
+replay and concurrent requests, cancellation, and transport ambiguity. The actual
+Unix socket test is mandatory in the existing Linux backend job. An executor that
+denies `AF_UNIX` socket creation reports that environmental failure; it must not
+skip the test, replace the transport, or report a passing socket qualification.
+
+`tests/test_owner_recovery_tools.py` actually restores complete disposable history
+through application startup, including adjacent floating-point values and literal
+proposal bytes, while proving that restore opens no network socket. It verifies
+session revocation, stopped state, fixed private entry points and redacted errors.
+Changed peer PID/UID, process generation, boot identity or socket inode/device
+must receive zero request bytes, including no mutation nonce.
+`scripts/release/test_oracle_robot_idle_recovery.py` uses real disposable Ed25519
+custody records and a durable SQLite attempt ledger for signature/parent revocation,
+expiry, changed evidence, private checkpoint retention and lost-response refusal.
+Late receipt/parent revocation or tampering and expiry are injected after the
+ordinary preflight check; the transactional attempt barrier must refuse them
+without recording an attempt or calling the mutation transport.
+Docker invocation checks prove the fixed image, no-network/read-only configuration,
+resource limits and private standard-input boundary; actual image and hosted
+qualification remain separate mandatory release evidence.
+
+The ordinary factory has no owner socket and no new HTTP route. These tests use
+synthetic history and credentials only; they neither contact a production journal
+nor certify a recovery of an existing legacy process.
+
 ## Consolidated-source approval regression
 
 Run product commands from the standalone `DruHustle/onesa-robot` repository root;
