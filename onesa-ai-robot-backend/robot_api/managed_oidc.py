@@ -80,6 +80,10 @@ def validate(config: IdentityConfig, packed: str, nonce: str | None = None) -> I
         pair = json.loads(packed)
         access = claims(config, pair["access_token"], config.audience)
         profile = claims(config, pair["id_token"], config.client_id)
+        # Resource tokens belong to this product alone. PyJWT also accepts
+        # arrays containing the configured audience, which is a wider contract.
+        if access.get("aud") != config.audience:
+            raise rejected()
         if nonce is not None and (
             not isinstance(profile.get("nonce"), str)
             or not hmac.compare_digest(profile["nonce"], nonce)
