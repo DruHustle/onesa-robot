@@ -61,6 +61,6 @@
       ]
     }
   ],
-  "sourceRepository": "DruHustle/onesa-company-portal",
+  "sourceRepository": "DruHustle/onesa-portal",
   "producer": "scripts/generate_identity_icons.mjs"
 }
