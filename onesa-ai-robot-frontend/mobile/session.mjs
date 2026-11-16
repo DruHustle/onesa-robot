@@ -25,24 +25,45 @@ export const ORIGIN = resolveApiOrigin(process.env.EXPO_PUBLIC_ROBOT_API_ORIGIN)
 export const CALLBACK = 'onesarobot://account/callback';
 export const AUTH = '/auth/identity';
 export const PRODUCT = 'robot';
+const REQUEST_TIMEOUT_MS = 10000;
 
 export async function call(path, {method = 'GET', body, csrf} = {}) {
-  const response = await fetch(ORIGIN + '/api/v1' + path, {
-    method, credentials: 'include',
-    headers: {Accept: 'application/json', Origin: ORIGIN,
-      ...(body === undefined ? {} : {'Content-Type': 'application/json'}),
-      ...(csrf ? {'X-CSRF-Token': csrf} : {})},
-    ...(body === undefined ? {} : {body: JSON.stringify(body)})
+  // Each request owns its deadline and cancellation. A pending proposal cannot
+  // hold Stop, and neither a stalled response body nor late success may verify it.
+  const controller = new AbortController();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error('The product service did not respond. Refresh its current status before trying again.'));
+      controller.abort();
+    }, REQUEST_TIMEOUT_MS);
   });
-  if (!response.ok) {
-    const err = new Error(response.status === 401 ? 'Sign in to continue.' :
-      response.status === 403 ? 'Your account does not have access to this action.' :
-      response.status === 409 ? 'The record changed. Refresh its current status.' :
-      'The product service could not complete this request. Refresh before retrying.');
-    err.status = response.status;
-    throw err;
+  try {
+    return await Promise.race([deadline, (async () => {
+      const response = await fetch(ORIGIN + '/api/v1' + path, {
+        method, credentials: 'include', signal:controller.signal,
+        headers: {Accept: 'application/json', Origin: ORIGIN,
+          ...(body === undefined ? {} : {'Content-Type': 'application/json'}),
+          ...(csrf ? {'X-CSRF-Token': csrf} : {})},
+        ...(body === undefined ? {} : {body: JSON.stringify(body)})
+      });
+      if (!response.ok) {
+        const err = new Error(response.status === 401 ? 'Sign in to continue.' :
+          response.status === 403 ? 'Your account does not have access to this action.' :
+          response.status === 409 ? 'The record changed. Refresh its current status.' :
+          'The product service could not complete this request. Refresh before retrying.');
+        err.status = response.status;
+        throw err;
+      }
+      return response.status === 204 ? null : response.json();
+    })()]);
+  } catch (error) {
+    // Also release an unread HTTP-error body; preserve the original denial.
+    controller.abort();
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-  return response.status === 204 ? null : response.json();
 }
 
 
