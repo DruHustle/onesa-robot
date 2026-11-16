@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
+from evidence import PRODUCT
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = {
@@ -17,7 +18,7 @@ class OracleBackendConfigTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.config = json.loads((ROOT / "compose.oracle-backend.yaml").read_text())
-        cls.product, cls.stage_port, cls.prod_port, cls.target_port = POLICY[ROOT.name]
+        cls.product, cls.stage_port, cls.prod_port, cls.target_port = POLICY[PRODUCT]
 
     def test_explicit_profiles_required_image_pins_and_source_labels(self):
         self.assertEqual(set(self.config["services"]), {"staging", "production"})
