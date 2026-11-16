@@ -83,7 +83,7 @@ print(json.dumps(v))
         )
         self.settings({})
         self.binding = {
-            "repository": "DruHustle/onesa-company-portal",
+            "repository": "DruHustle/onesa-portal",
             "component": "api",
             "candidate_commit": "a" * 40,
             "source_tree": "b" * 40,
@@ -531,7 +531,7 @@ print(json.dumps(v))
 class GitHubEvidenceTests(unittest.TestCase):
     def setUp(self):
         self.binding = {
-            "repository": "DruHustle/onesa-company-portal",
+            "repository": "DruHustle/onesa-portal",
             "candidate_commit": "a" * 40,
             "source_tree": "b" * 40,
         }
