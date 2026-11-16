@@ -5,7 +5,15 @@ from xml.etree import ElementTree as ET
 import pytest
 from fastapi.testclient import TestClient
 
-from robot_api.humanoid import BY_NAME, JOINTS, Humanoid, MotionRequest, SimulatedActuators, urdf
+from robot_api.humanoid import (
+    BY_NAME,
+    JOINTS,
+    ActuatorFault,
+    Humanoid,
+    MotionRequest,
+    SimulatedActuators,
+    urdf,
+)
 from robot_api.main import Settings, create_app
 from robot_api.security import password_hash
 
@@ -103,7 +111,7 @@ def test_physical_bank_and_driver_failure_cannot_leave_command_running():
         raise OSError("private driver details")
 
     bank.write = fail
-    with pytest.raises(ValueError, match="stopped") as error:
+    with pytest.raises(ActuatorFault, match="stopped") as error:
         robot.tick(11)
     assert "private" not in str(error.value)
     assert robot.active is None
@@ -311,8 +319,8 @@ def test_stop_adapter_failure_cannot_interrupt_gateway_revocation(api, monkeypat
     assert observed["stopped"] and observed["active_command"] is None
     assert observed["connection"] == "simulator_fault"
     assert observed["history"][-1]["reason"] == "actuator_failure"
-    assert api.post("/api/v1/reset", json={"password": PASSWORD}).status_code == 200
-    assert api.post("/api/v1/humanoid/proposals", json=request()).status_code == 422
+    assert api.post("/api/v1/reset", json={"password": PASSWORD}).status_code == 503
+    assert api.post("/api/v1/humanoid/proposals", json=request()).status_code == 503
 
 
 @pytest.mark.parametrize("interruption", ["stop_and_reset", "logout", "expired_session"])

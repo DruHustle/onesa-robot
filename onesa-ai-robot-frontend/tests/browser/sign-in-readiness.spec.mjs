@@ -97,3 +97,28 @@ test('sign-in observer covers the existing readiness and credential request budg
  expect(logins).toBe(1);expect(mutations).toEqual([]);
  await expect(page.getByLabel('Password',{exact:true})).toHaveValue('');
 });
+
+
+test('an operator sees when the service needs journal recovery before credentials are sent', async ({page}) => {
+ let readiness = 0, logins = 0;
+ await page.route('**/api/v1/**', async route => {
+  const path = new URL(route.request().url()).pathname;
+  if (path.endsWith('/ready')) {
+   readiness++;
+   await route.fulfill({status:503, json:{detail:'Remote simulation journal requires recovery'}});
+  } else if (path.endsWith('/identity/config')) {
+   await route.fulfill({status:200, json:{enabled:false}});
+  } else {
+   if (path.endsWith('/auth/login')) logins++;
+   await route.fulfill({status:401, json:{detail:'Signed out'}});
+  }
+ });
+ await page.goto('/console');
+ await page.getByLabel('Operator name').fill('synthetic-operator');
+ await page.getByLabel('Password', {exact:true}).fill('synthetic-password');
+ await page.getByRole('button', {name:'Sign in', exact:true}).click();
+ await expect(page.locator('#notice')).toContainText('The simulation journal needs recovery');
+ await expect(page.getByLabel('Password', {exact:true})).toHaveValue('synthetic-password');
+ expect(readiness).toBe(1);
+ expect(logins).toBe(0);
+});

@@ -616,6 +616,17 @@
             ],
             "title": "Account Url"
           },
+          "authorization_endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Endpoint"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -630,6 +641,11 @@
       "IdentityStart": {
         "additionalProperties": false,
         "properties": {
+          "mobile": {
+            "default": false,
+            "title": "Mobile",
+            "type": "boolean"
+          },
           "step_up": {
             "default": false,
             "title": "Step Up",
@@ -2637,6 +2653,19 @@
         "title": "RobotProfile",
         "type": "object"
       },
+      "ServiceError": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ServiceError",
+        "type": "object"
+      },
       "SessionResponse": {
         "properties": {
           "authentication_method": {
@@ -3315,6 +3344,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Allow Physical Permission"
@@ -3680,6 +3719,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid Propose"
@@ -3730,6 +3779,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid Approve"
@@ -3748,6 +3807,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid State"
@@ -4038,6 +4107,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Reset"
@@ -4206,6 +4285,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "The task has already completed."
           },
           "422": {
             "content": {

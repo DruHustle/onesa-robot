@@ -11,3 +11,6 @@ export ROS_LOCALHOST_ONLY=1 ROS_DOMAIN_ID=117
 ros2 interface show onesa_sim_interfaces/msg/SimulationTelemetry
 ros2 interface show onesa_sim_interfaces/msg/SimulationProposal
 python3 /source/test-messaging.py
+python3 -m unittest discover -s /source -p test_joint_feedback.py
+python3 /source/test-feedback-loopback.py
+python3 /source/test_recorded_feedback.py

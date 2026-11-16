@@ -1,0 +1,23 @@
+{
+  "name": "onesa-robot-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "prebuild": "expo prebuild --clean --no-install --template ./node_modules/expo/template.tgz",
+    "bundle": "expo export --platform android --platform ios",
+    "test": "node --test session.test.mjs"
+  },
+  "dependencies": {
+    "expo": "57.0.31",
+    "expo-web-browser": "57.0.3",
+    "expo-crypto": "57.0.4",
+    "expo-secure-store": "57.0.4",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "5.7.0"
+  }
+}

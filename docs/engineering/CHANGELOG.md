@@ -1,5 +1,15 @@
 # Engineering changelog
 
+## 2026-11-11 — Bench feedback and operator supervision — unreleased
+
+Add a read-only ROS 2 JointState bench observer and an offline rosbag2 checker.
+Both compare feedback with the supplied URDF and report timing and axis coverage.
+The 33-axis simulator checks actuator readback before acknowledging a move. A
+feedback fault cancels active motion and revokes physical-operation permission.
+The console clears stale permission and joint displays and requests a new review
+when the administrator permission revision or proposed humanoid plan changes.
+The physical drive interface and hardware stop still require commissioning.
+
 ## 2026-10-31 — Full-body humanoid reference — unreleased
 
 Recover the 33-axis reference model, whole-frame simulated actuator interface,

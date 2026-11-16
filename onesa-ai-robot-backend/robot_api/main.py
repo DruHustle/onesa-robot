@@ -12,13 +12,14 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -151,6 +152,13 @@ class Settings(BaseSettings):
             raise ValueError("Invalid operator password hash")
         return self
 
+    identity_audience: str = Field(default="", validation_alias="ONESA_IDENTITY_AUDIENCE")
+    identity_public_jwks: str = Field(default="", validation_alias="ONESA_IDENTITY_JWKS")
+    identity_mapping_issuer: str = Field(
+        default="", validation_alias="ONESA_IDENTITY_MAPPING_ISSUER"
+    )
+    identity_account_url: str = Field(default="", validation_alias="ONESA_IDENTITY_ACCOUNT_URL")
+
     def identity_configuration(self) -> identity.IdentityConfig:
         return identity.IdentityConfig(
             issuer=self.identity_issuer,
@@ -158,6 +166,10 @@ class Settings(BaseSettings):
             client_secret=self.identity_client_secret.get_secret_value(),
             redirect_uri=self.identity_callback_url,
             product="robot",
+            audience=self.identity_audience,
+            public_jwks=self.identity_public_jwks,
+            mapping_issuer=self.identity_mapping_issuer,
+            account_url=self.identity_account_url,
             allow_local_http=self.deployment_environment == "local",
         )
 
@@ -177,9 +189,17 @@ class Confirmation(BaseModel):
 class IdentityStart(BaseModel):
     model_config = ConfigDict(extra="forbid")
     step_up: bool = False
+    mobile: bool = False
+
+
+class MobileExchange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    state: str = Field(pattern=r"^native_[A-Za-z0-9_-]{43}$")
+    code: str = Field(min_length=1, max_length=4096)
 
 
 class IdentityConfigurationResponse(BaseModel):
+    authorization_endpoint: str | None = None
     enabled: bool
     account_url: str | None = None
 
@@ -190,6 +210,7 @@ class IdentityStartResponse(BaseModel):
 
 @dataclass(frozen=True)
 class IdentityFlow:
+    nonce: str
     browser_hash: str
     verifier: str = field(repr=False)
     expires: float
@@ -299,6 +320,18 @@ class TaskResponse(BaseModel):
 class ActionResponse(BaseModel):
     status: str
     physical_actuation: Literal[False] = False
+
+
+class ServiceError(BaseModel):
+    detail: str
+
+
+ACTUATOR_UNAVAILABLE: dict[int | str, dict[str, Any]] = {
+    503: {
+        "description": "Simulation service unavailable, including an actuator feedback fault.",
+        "model": ServiceError,
+    }
+}
 
 
 class LogoutResponse(ActionResponse):
@@ -650,23 +683,34 @@ class State:
             return
         if not isinstance(payload, dict) or payload.get("inspection") is None:
             return
-        proposal = Proposal.model_validate_json(row["proposal"])
-        record = proposal.inspection
-        if record is None:
-            return
-        active = getattr(self, "active", None)
-        elapsed = record.elapsed_seconds
-        if active is not None and active["id"] == row["id"]:
-            # Prefer the last in-memory observation; a journal failure must not
-            # erase already collected evidence or pretend an execution completed.
-            proposal = active["proposal"]
+        try:
+            proposal = Proposal.model_validate_json(row["proposal"])
             record = proposal.inspection
             if record is None:
-                raise SafetyViolation("Active inspection lost its approved plan")
-            elapsed = max(0.0, time.monotonic() - active["started"])
-        updated = inspection.interrupt(record, reason, time.time(), elapsed)
-        if updated != record:
-            self.save_inspection(row["id"], proposal, updated)
+                return
+            active = getattr(self, "active", None)
+            elapsed = record.elapsed_seconds
+            if active is not None and active["id"] == row["id"]:
+                # Prefer the last in-memory observation; a journal failure must not
+                # erase already collected evidence or pretend an execution completed.
+                proposal = active["proposal"]
+                record = proposal.inspection
+                if record is None:
+                    raise SafetyViolation("Active inspection lost its approved plan")
+                elapsed = max(0.0, time.monotonic() - active["started"])
+            updated = inspection.interrupt(record, reason, time.time(), elapsed)
+            if updated != record:
+                self.save_inspection(row["id"], proposal, updated)
+        except (ValueError, TypeError):
+            # Invalid saved inspection evidence must never prevent Stop, logout,
+            # watchdog failure handling or process-restart cancellation. Keep the
+            # original proposal bytes for diagnosis; do not manufacture a report.
+            self.db.execute(
+                "UPDATE tasks SET state='cancelled',reason='inspection_integrity' "
+                "WHERE id=? AND state IN ('running','proposed')",
+                (row["id"],),
+            )
+            self.dirty(row["id"])
 
     def interrupt_inspections(self, reason: str) -> None:
         for row in self.db.execute("SELECT * FROM tasks WHERE state IN ('running','proposed')"):
@@ -739,7 +783,62 @@ class State:
         self.db.commit()
         self.active = None
 
+    def expire_proposals(self) -> None:
+        # An unapproved proposal is useful only inside the same freshness window
+        # enforced by SafetyGate.validate(). Retire abandoned/corrupt records so
+        # they cannot indefinitely block MFA step-up, humanoid work or permission.
+        # A failed remote journal must remain fail-closed and must not accumulate
+        # unacknowledged cleanup writes that would prevent fenced recovery.
+        if self.journal_failed:
+            return
+        now = time.time()
+        changed = False
+        rows = self.db.execute("SELECT id,proposal FROM tasks WHERE state='proposed'").fetchall()
+        for row in rows:
+            try:
+                proposal = Proposal.model_validate_json(row["proposal"])
+                age = now - proposal.issued_at
+                if isfinite(age) and -1 <= age <= self.gate.freshness_seconds:
+                    continue
+                reason = (
+                    "proposal_invalid_timestamp"
+                    if not isfinite(age) or age < -1
+                    else "proposal_expired"
+                )
+                if proposal.inspection is not None:
+                    self.interrupt_inspection(row, reason)
+            except (ValueError, TypeError):
+                # Keep the original proposal bytes for diagnosis. Distinguish a
+                # corrupt inspection extension from an invalid legacy proposal.
+                try:
+                    payload = json.loads(row["proposal"])
+                except (ValueError, TypeError):
+                    payload = None
+                reason = (
+                    "inspection_integrity"
+                    if isinstance(payload, dict) and payload.get("inspection") is not None
+                    else "proposal_integrity"
+                )
+            current = self.db.execute("SELECT state FROM tasks WHERE id=?", (row["id"],)).fetchone()
+            if current is None:
+                continue
+            if current["state"] == "proposed":
+                updated = self.db.execute(
+                    "UPDATE tasks SET state='cancelled',reason=? WHERE id=? AND state='proposed'",
+                    (reason, row["id"]),
+                )
+                if updated.rowcount:
+                    self.dirty(row["id"])
+                    changed = True
+            elif current["state"] == "cancelled":
+                # interrupt_inspection() may already have terminally cancelled
+                # corrupt inspection evidence and queued its durable journal write.
+                changed = True
+        if changed:
+            self.db.commit()
+
     def tick(self) -> None:
+        self.expire_proposals()
         whole = self.humanoid
         owner = whole.active.owner if whole.active else whole.pending[0] if whole.pending else None
         if owner:
@@ -757,10 +856,12 @@ class State:
                 self.cancel("operator_connection_lost", stop=True)
             elif whole.pending and time.time() - whole.pending[1].request.issued_at > 15:
                 whole.stop("proposal_expired")
+                if whole.faulted:
+                    self.cancel("actuator_failure", stop=True)
             else:
                 try:
                     whole.tick(time.monotonic())
-                except ValueError:
+                except humanoid.ActuatorFault:
                     self.cancel("actuator_failure", stop=True)
         if self.physical_permission_owner is not None:
             permitted = self.db.execute(
@@ -818,6 +919,7 @@ def create_app(
 ) -> FastAPI:
     config = settings or Settings()
     identity_config = config.identity_configuration() if config.identity_enabled else None
+    local_simulator = urlsplit(config.public_origin).hostname in {"localhost", "127.0.0.1", "::1"}
 
     @asynccontextmanager
     async def lifespan(app):
@@ -931,6 +1033,13 @@ def create_app(
         openapi_url=None,
     )
 
+    @app.exception_handler(humanoid.ActuatorFault)
+    async def actuator_fault(request: Request, error: humanoid.ActuatorFault):
+        sim = request.app.state.sim
+        if not sim.stopped or sim.physical_permission_owner:
+            sim.cancel("actuator_failure", stop=True)
+        return JSONResponse({"detail": str(error)}, status_code=503)
+
     @app.middleware("http")
     async def boundary(request: Request, call_next):
         if request.method not in ("GET", "HEAD", "OPTIONS"):
@@ -1026,7 +1135,8 @@ def create_app(
 
     def identity_owner(principal: identity.Identity) -> str:
         # Email is a display/contact attribute, never an account-linking key.
-        value = principal.issuer + "\x00" + principal.subject
+        namespace = (identity_config.mapping_issuer if identity_config else "") or principal.issuer
+        value = namespace + "\x00" + principal.subject
         return "sso:" + hashlib.sha256(value.encode()).hexdigest()
 
     def identity_role(
@@ -1071,6 +1181,11 @@ def create_app(
             raise HTTPException(403, "CSRF verification failed")
         result = dict(row)
         if not identity_config:
+            if not local_simulator and request.url.path not in {
+                "/api/v1/stop",
+                "/api/v1/auth/logout",
+            }:
+                raise HTTPException(401, "Sign in through Onesa Company Portal")
             return result
         linked = sim.identity_sessions.get(key)
         if linked is None:
@@ -1171,7 +1286,11 @@ def create_app(
     async def physical_permission(request: Request, administrator: Administrator):
         return state(request).physical_permission()
 
-    @app.post("/api/v1/admin/physical-operation/allow", response_model=PhysicalPermissionResponse)
+    @app.post(
+        "/api/v1/admin/physical-operation/allow",
+        response_model=PhysicalPermissionResponse,
+        responses=ACTUATOR_UNAVAILABLE,
+    )
     async def allow_physical_permission(
         value: PhysicalPermissionConfirmation, request: Request, administrator: Administrator
     ):
@@ -1201,6 +1320,7 @@ def create_app(
             raise HTTPException(
                 409, "Confirm an already-stopped, idle simulator before allowing operation"
             )
+        sim.humanoid.verified_positions()
         sim.physical_permission_owner = administrator["token"]
         sim.physical_permission_expires = float(current[0])
         sim.physical_permission_revision += 1
@@ -1267,12 +1387,25 @@ def create_app(
             "deployment_environment": config.deployment_environment,
         }
 
-    @app.get("/api/v1/auth/identity/config", response_model=IdentityConfigurationResponse)
+    @app.get(
+        "/api/v1/auth/identity/config",
+        response_model=IdentityConfigurationResponse,
+        response_model_exclude_unset=True,
+    )
     async def identity_configuration():
         issuer = urlsplit(identity_config.issuer) if identity_config else None
         return {
             "enabled": identity_config is not None,
-            "account_url": f"{issuer.scheme}://{issuer.netloc}/account" if issuer else None,
+            **(
+                {"authorization_endpoint": identity_config.issuer + "authorize"}
+                if identity_config and identity_config.audience
+                else {}
+            ),
+            "account_url": (
+                identity_config.account_url or f"{issuer.scheme}://{issuer.netloc}/account"
+            )
+            if issuer and identity_config
+            else None,
         }
 
     @app.post("/api/v1/auth/identity/start", response_model=IdentityStartResponse)
@@ -1309,8 +1442,14 @@ def create_app(
             raise HTTPException(429, "Sign-in is busy. Please wait before trying again")
         attempts.append(time.monotonic())
         state_value, nonce, verifier = identity.new_transaction()
+        if value.mobile:
+            # Native step-up uses the same one-use deep-link transaction. The
+            # existing finish_identity path binds it to the live subject and
+            # requires fresh central MFA before replacing the current session.
+            state_value = "native_" + state_value
         browser = secrets.token_urlsafe(32)
         sim.identity_flows[token_hash(state_value)] = IdentityFlow(
+            nonce=nonce,
             browser_hash=token_hash(browser),
             verifier=verifier,
             expires=now + 600,
@@ -1351,7 +1490,41 @@ def create_app(
             response.headers["location"] = "/console?identity=failed"
             return response
         state_value = request.query_params.get("state", "")
-        flow = sim.identity_flows.pop(token_hash(state_value), None)
+        if state_value.startswith("native_"):
+            pending = sim.identity_flows.get(token_hash(state_value))
+            if (
+                not pending
+                or pending.expires <= time.time()
+                or request.query_params.get("iss", identity_config.issuer) != identity_config.issuer
+            ):
+                raise HTTPException(400, "Start sign-in again")
+            params = {"state": state_value}
+            code = request.query_params.get("code", "")
+            if "error" in request.query_params or not code or len(code) > 4096:
+                params["error"] = "cancelled"
+            else:
+                params["code"] = code
+            return RedirectResponse(
+                "onesarobot://account/callback?" + urlencode(params), status_code=303
+            )
+        return await finish_identity(
+            request, response, state_value, request.query_params.get("code", "")
+        )
+
+    @app.post("/api/v1/auth/identity/mobile/exchange", include_in_schema=False)
+    async def mobile_exchange(data: MobileExchange, request: Request):
+        response = JSONResponse({"signed_in": True}, headers={"cache-control": "no-store"})
+        response.delete_cookie("robot_identity", path="/api/v1/auth/identity")
+        result = await finish_identity(request, response, data.state, data.code)
+        if "location" in result.headers:
+            raise HTTPException(401, "Start Onesa sign-in again")
+        return result
+
+    async def finish_identity(request: Request, response: Response, state_value: str, code: str):
+        if identity_config is None:
+            raise HTTPException(404, "Onesa sign-in is not configured")
+        sim = state(request)
+        flow = sim.identity_flows.get(token_hash(state_value))
         if (
             flow is None
             or flow.expires <= time.time()
@@ -1363,14 +1536,26 @@ def create_app(
         ):
             response.headers["location"] = "/console?identity=failed"
             return response
+        del sim.identity_flows[token_hash(state_value)]
         access_token: str | None = None
         try:
-            access_token = await asyncio.to_thread(
-                identity.exchange_code,
-                identity_config,
-                request.query_params.get("code", ""),
-                flow.verifier,
-            )
+            if identity_config.audience:
+                from robot_api.managed_oidc import exchange
+
+                access_token = await asyncio.to_thread(
+                    exchange,
+                    identity_config,
+                    code,
+                    flow.verifier,
+                    flow.nonce,
+                )
+            else:
+                access_token = await asyncio.to_thread(
+                    identity.exchange_code,
+                    identity_config,
+                    code,
+                    flow.verifier,
+                )
             principal = await asyncio.to_thread(
                 identity.validate_session, identity_config, access_token
             )
@@ -1442,7 +1627,7 @@ def create_app(
 
     @app.post("/api/v1/auth/login", response_model=SessionResponse)
     async def login(value: Login, request: Request, response: Response):
-        if identity_config:
+        if identity_config or not local_simulator:
             raise HTTPException(403, "Use your Onesa account to sign in")
         sim = state(request)
         # No forwarded header trust. A single configured operator; failures are global
@@ -1899,7 +2084,11 @@ def create_app(
             headers={"Content-Disposition": 'attachment; filename="onesa-humanoid-reference.urdf"'},
         )
 
-    @app.get("/api/v1/humanoid/state", response_model=humanoid.Observation)
+    @app.get(
+        "/api/v1/humanoid/state",
+        response_model=humanoid.Observation,
+        responses=ACTUATOR_UNAVAILABLE,
+    )
     async def humanoid_state(request: Request, operator: Operator):
         sim = state(request)
         observed = sim.humanoid.observe(operator["token"], time.time(), sim.stopped)
@@ -1933,6 +2122,7 @@ def create_app(
 
     def humanoid_ready(request: Request) -> State:
         sim = state(request, require_watchdog=True)
+        sim.humanoid.require_healthy()
         if sim.journal_failed:
             raise HTTPException(503, "Remote simulation journal requires recovery")
         if (
@@ -1945,7 +2135,12 @@ def create_app(
             raise HTTPException(409, "Reset Stop and complete or cancel legacy tasks first")
         return sim
 
-    @app.post("/api/v1/humanoid/proposals", status_code=201, response_model=humanoid.MotionPlan)
+    @app.post(
+        "/api/v1/humanoid/proposals",
+        status_code=201,
+        response_model=humanoid.MotionPlan,
+        responses=ACTUATOR_UNAVAILABLE,
+    )
     async def humanoid_propose(value: humanoid.MotionRequest, request: Request, operator: Operator):
         sim = humanoid_ready(request)
         try:
@@ -1957,7 +2152,11 @@ def create_app(
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
 
-    @app.post("/api/v1/humanoid/proposals/{command_id}/approve", response_model=humanoid.MotionPlan)
+    @app.post(
+        "/api/v1/humanoid/proposals/{command_id}/approve",
+        response_model=humanoid.MotionPlan,
+        responses=ACTUATOR_UNAVAILABLE,
+    )
     async def humanoid_approve(
         command_id: UUID, value: MissionConfirmation, request: Request, operator: Operator
     ):
@@ -1979,7 +2178,11 @@ def create_app(
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
 
-    @app.post("/api/v1/tasks/{task_id}/cancel", response_model=ActionResponse)
+    @app.post(
+        "/api/v1/tasks/{task_id}/cancel",
+        response_model=ActionResponse,
+        responses={409: {"model": ServiceError, "description": "The task has already completed."}},
+    )
     async def cancel(task_id: str, request: Request, operator: Operator):
         sim = state(request)
         row = sim.db.execute(
@@ -1987,6 +2190,8 @@ def create_app(
         ).fetchone()
         if row is None:
             raise HTTPException(404, "Task not found")
+        if row["state"] == "completed":
+            raise HTTPException(409, "The task has already completed")
         if row["state"] == "running" or (sim.active and sim.active["id"] == task_id):
             sim.cancel("operator_cancel", stop=True)
         elif row["state"] == "proposed":
@@ -2005,7 +2210,7 @@ def create_app(
         state(request).cancel("operator_stop", stop=True)
         return {"status": "stopped"}
 
-    @app.post("/api/v1/reset", response_model=ActionResponse)
+    @app.post("/api/v1/reset", response_model=ActionResponse, responses=ACTUATOR_UNAVAILABLE)
     async def reset(value: Confirmation, request: Request, operator: Operator):
         sim = state(request, require_watchdog=True)
         stop_epoch = sim.stop_epoch
@@ -2018,6 +2223,7 @@ def create_app(
             raise HTTPException(409, "Stop changed during reset confirmation")
         if sim.active or sim.humanoid.active or sim.humanoid.pending:
             raise HTTPException(409, "Cancel the current task first")
+        sim.humanoid.verified_positions()
         sim.db.execute("UPDATE safety SET stopped=0 WHERE id=1")
         sim.db.commit()
         return {"status": "reset", "physical_actuation": False}
