@@ -99,13 +99,17 @@ test('whole-body review uses exact immutable targets and preserves input through
 
 test('Stop readback that still reports an active command keeps heartbeat paused',async({page})=>{
  const state=await fixture(page);await propose(page);await approve(page);
- const heartbeats=state.heartbeats;state.leaveActiveOnStop();
+ state.leaveActiveOnStop();
  await page.locator('#humanoid-stop').click();
  await expect.poll(()=>state.stops).toBe(1);
+ // Valid supervision can run while Playwright waits to dispatch the click.
+ // The stop request is the boundary; rejected late heartbeats must also stay zero.
+ const heartbeatsAfterStop=state.heartbeats;
  await expect(page.locator('#humanoid-state')).toContainText(/Stop could not be verified|Stop acknowledgement is unavailable/);
  expect(state.active).not.toBeNull();
  await page.waitForTimeout(650);
- expect(state.heartbeats).toBe(heartbeats);
+ expect(state.heartbeats).toBe(heartbeatsAfterStop);
+ expect(state.lateHeartbeats).toBe(0);
 });
 
 test('the shared console Stop pauses humanoid supervision and verifies both views',async({page})=>{
