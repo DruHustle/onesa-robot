@@ -38,6 +38,14 @@ exercised; native availability and production identity/provider acceptance
 remain separate release blockers.
 No hardware, ROS actuation or store submission is authorized by this UI.
 
+Every native API request has its own ten-second deadline, including reading its
+JSON response. A stalled request is aborted and reported as unverified; it never
+replays a mutation or accepts a late success. Stop keeps its separate request and
+all acknowledgement, task-history and humanoid readbacks. A timeout does not prove
+that the server cancelled an operation: refresh the current state before trying
+again. The network regression uses actual cancellation signals to cover a hung
+mutation and body read while an independent Stop completes and remains verified.
+
 Run `npm test` for pure native network/Stop regressions. Required before
 GO: full pinned Android/iOS builds, installed-device Stop during an in-flight
 request, fresh/signed-out sign-in and deep-link return, actual MFA approval,

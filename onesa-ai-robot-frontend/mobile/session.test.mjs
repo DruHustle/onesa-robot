@@ -36,7 +36,7 @@ test('native API origin rejects insecure, path-bearing and off-domain overrides'
 
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {signIn, CALLBACK, AUTH, stopSimulation, resetSimulation, resolveApiOrigin, ORIGIN} from './session.mjs';
+import {call, signIn, CALLBACK, AUTH, stopSimulation, resetSimulation, resolveApiOrigin, ORIGIN} from './session.mjs';
 const state = 'native_' + 'A'.repeat(43);
 const url = 'https://auth.onesa.eu/authorize?state=' + state + '&code_challenge_method=S256';
 for (const [scenario, value] of Object.entries({correct:CALLBACK+'?state='+state+'&code=fixture', stale:CALLBACK+'?state=wrong&code=fixture', foreign:'wrong://account/callback?state='+state+'&code=fixture', duplicate:CALLBACK+'?state='+state+'&code=fixture&code=other', cancelled:CALLBACK+'?state='+state+'&error=cancelled'})) {
@@ -74,6 +74,60 @@ test('native sign-in supports same-account MFA step-up', async () => {
   assert.deepEqual(seen[0].options.body, {mobile:true, step_up:true});
   assert.equal(seen[0].options.csrf, 'synthetic-session-csrf');
   assert.equal(seen[1].path, AUTH + '/mobile/exchange');
+});
+
+test('native requests abort stalled transport and body reads without delaying Stop or replaying commands', {timeout:30000}, async () => {
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  let finishBody;
+  let pending;
+  globalThis.fetch = async (url, options) => {
+    const path = new URL(url).pathname.replace('/api/v1', '');
+    assert.ok(options.signal instanceof AbortSignal);
+    assert.equal(options.signal.aborted, false);
+    seen.push({path, options});
+    if (path === '/tasks' && options.method === 'POST') {
+      return new Promise((_, reject) => options.signal.addEventListener('abort', () => {
+        reject(new DOMException('Synthetic transport cancelled', 'AbortError'));
+      }, {once:true}));
+    }
+    if (path === '/stalled-body') {
+      return {ok:true, status:200, json:() => new Promise(resolve => {finishBody = resolve;})};
+    }
+    if (path === '/denied') return {ok:false, status:403};
+    const values = {
+      '/stop': {status:'stopped', physical_actuation:false},
+      '/status': {mode:'simulation', stopped:true, active_task:null, physical_actuation:false},
+      '/tasks': {tasks:[{state:'cancelled'}]},
+      '/humanoid/state': {connection:'simulated_actuators', stopped:true, active_command:null, pending:null, physical_actuation:false},
+    };
+    assert.ok(Object.hasOwn(values, path));
+    return {ok:true, status:200, json:async () => values[path]};
+  };
+  try {
+    const mutation = call('/tasks', {method:'POST', csrf:'synthetic-csrf', body:{confirmed:true}});
+    const body = call('/stalled-body');
+    pending = Promise.allSettled([mutation, body]);
+    await assert.rejects(call('/denied'), error => error.status === 403);
+    const stopped = await stopSimulation('synthetic-csrf');
+    assert.equal(stopped.stopped, true);
+    assert.deepEqual(seen.map(entry => entry.path), ['/tasks','/stalled-body','/denied','/stop','/status','/tasks','/humanoid/state']);
+    assert.equal(new Set(seen.map(entry => entry.options.signal)).size, seen.length);
+    assert.ok(seen.filter(entry => entry.path !== '/denied').every(entry => !entry.options.signal.aborted));
+    assert.equal(seen[2].options.signal.aborted, true);
+    for (const outcome of await pending) {
+      assert.equal(outcome.status, 'rejected');
+      assert.match(outcome.reason.message, /did not respond.*Refresh/);
+    }
+    assert.ok(seen.slice(0, 2).every(entry => entry.options.signal.aborted));
+    assert.ok(seen.slice(3).every(entry => !entry.options.signal.aborted));
+    finishBody({status:'late-success'});
+    await assert.rejects(body, /did not respond.*Refresh/);
+    assert.equal(seen.length, 7);
+  } finally {
+    if (pending) await pending;
+    globalThis.fetch = originalFetch;
+  }
 });
 
 
