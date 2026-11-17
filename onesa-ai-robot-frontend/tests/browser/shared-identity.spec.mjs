@@ -147,7 +147,7 @@ for (const [tier, linkName] of [["user", "Create an Onesa account"], ["admin", "
     const fixture = await identityFixture(page, { signedIn: false });
     try {
       const resume = fixture.server.origin + "/console?registration=complete";
-      await page.route("https://auth.onesa.eu/register?*", route => {
+      await page.route("https://account.onesa.eu/register?*", route => {
         expect(Object.fromEntries(new URL(route.request().url()).searchParams)).toEqual({ product: "robot", platform: "web", audience: tier });
         return route.fulfill({ contentType: "text/html", body: `<!doctype html><script>location.replace(${JSON.stringify(resume)})</script>` });
       });
