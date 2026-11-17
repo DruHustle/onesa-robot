@@ -141,3 +141,25 @@ test('missing product access has a clear recovery route and removes callback sta
   await expect(page).toHaveURL(fixture.server.origin+'/console');
  }finally{await fixture.server.close();}
 });
+
+for (const [tier, linkName] of [["user", "Create an Onesa account"], ["admin", "Request administrator access"]]) {
+  test(`${tier} registration returns to Robot and starts a new product sign-in`, async ({ page }) => {
+    const fixture = await identityFixture(page, { signedIn: false });
+    try {
+      const resume = fixture.server.origin + "/console?registration=complete";
+      await page.route("https://auth.onesa.eu/register?*", route => {
+        expect(Object.fromEntries(new URL(route.request().url()).searchParams)).toEqual({ product: "robot", platform: "web", audience: tier });
+        return route.fulfill({ contentType: "text/html", body: `<!doctype html><script>location.replace(${JSON.stringify(resume)})</script>` });
+      });
+      await page.goto(fixture.server.origin + "/console");
+      await Promise.all([
+        page.waitForRequest(request => request.isNavigationRequest() && request.url() === resume),
+        page.getByRole("link", { name: linkName, exact: true }).click(),
+      ]);
+      await expect(page.getByRole("heading", { name: "Onesa account sign-in" })).toBeVisible();
+      expect(fixture.writes.filter(write => write.path === "/api/v1/auth/identity/start")).toHaveLength(1);
+    } finally {
+      await fixture.server.close();
+    }
+  });
+}

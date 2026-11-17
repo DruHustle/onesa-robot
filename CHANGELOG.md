@@ -1,5 +1,7 @@
 # Changelog
 
+- Robot console and installed simulator clients resume shared sign-in after Onesa user or administrator registration.
+
 - The hosted console sends account creation and sign-in to Company Portal and refuses local operator passwords. Loopback simulations retain their operator fixture.
 
 ## Unreleased
