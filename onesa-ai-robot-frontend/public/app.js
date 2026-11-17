@@ -89,6 +89,12 @@ async function configureIdentity(){
    const link=byId('onesa-account-link');if(link){link.href=account.href;link.hidden=false;}
    byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
    if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
+   if(!csrf && new URLSearchParams(window.location?.search).get('registration')==='complete'){
+     const entry=new URL(window.location.href);
+     entry.searchParams.delete('registration');
+     window.history.replaceState(null,'',entry.pathname+entry.search+entry.hash);
+     await startIdentity();
+   }
   }
   if(window.location?.search){
    const outcome=new URLSearchParams(window.location.search).get('identity');
