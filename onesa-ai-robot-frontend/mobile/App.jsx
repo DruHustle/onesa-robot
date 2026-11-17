@@ -42,7 +42,7 @@ export default function App() {
     setRegistering(true);
     try {
       const origin = process.env.EXPO_PUBLIC_ONESA_REGISTRATION_ORIGIN ||
-        (ORIGIN === 'https://robot.onesa.eu' ? 'https://auth.onesa.eu' : '');
+        (ORIGIN === 'https://robot.onesa.eu' ? 'https://account.onesa.eu' : '');
       if (!origin) throw new Error('Registration is unavailable in this environment.');
       await registerWithOnesa(Browser.openAuthSessionAsync, Platform.OS, audience, () => model.current?.connect(true), origin);
     } catch (error) {
