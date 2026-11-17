@@ -141,3 +141,16 @@ test('missing product access has a clear recovery route and removes callback sta
   await expect(page).toHaveURL(fixture.server.origin+'/console');
  }finally{await fixture.server.close();}
 });
+
+test('registration returns to Robot and starts a new product sign-in',async({page})=>{
+ const fixture=await identityFixture(page,{signedIn:false});
+ try {
+  await page.route('https://auth.onesa.eu/register?*',route=>route.fulfill({
+   status:303,headers:{location:fixture.server.origin+'/console?registration=complete'},body:'',
+  }));
+  await page.goto(fixture.server.origin+'/console');
+  await page.getByRole('link',{name:'Create an Onesa account'}).click();
+  await expect(page.getByRole('heading',{name:'Onesa account sign-in'})).toBeVisible();
+  expect(fixture.writes.filter(write=>write.path==='/api/v1/auth/identity/start')).toHaveLength(1);
+ } finally {await fixture.server.close();}
+});

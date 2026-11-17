@@ -4,6 +4,8 @@ import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import * as Browser from 'expo-web-browser';
 import * as SecureStore from 'expo-secure-store';
 import {randomUUID} from 'expo-crypto';
+import {registerWithOnesa} from './registration.mjs';
+import {ORIGIN} from './session.mjs';
 import {createOperator} from './operator.mjs';
 
 export default function App() {
@@ -32,6 +34,24 @@ export default function App() {
     return () => {activity.remove();focus.forEach(listener=>listener.remove());links.remove();operator.dispose();if(model.current === operator) model.current=null;};
   }, []);
   const {account, items, selected, busy, stopping, available, error, message} = view;
+  const [registering, setRegistering] = useState(false);
+  const registrationOpen = useRef(false);
+  async function register(audience) {
+    if (registrationOpen.current) return;
+    registrationOpen.current = true;
+    setRegistering(true);
+    try {
+      const origin = process.env.EXPO_PUBLIC_ONESA_REGISTRATION_ORIGIN ||
+        (ORIGIN === 'https://robot.onesa.eu' ? 'https://auth.onesa.eu' : '');
+      if (!origin) throw new Error('Registration is unavailable in this environment.');
+      await registerWithOnesa(Browser.openAuthSessionAsync, Platform.OS, audience, () => model.current?.connect(true), origin);
+    } catch (error) {
+      Alert.alert('Onesa registration', error.message);
+    } finally {
+      registrationOpen.current = false;
+      setRegistering(false);
+    }
+  }
   function confirmCommand(title, kind, id) {
     const confirm = model.current?.review(kind,id);
     Alert.alert(title,
@@ -43,7 +63,11 @@ export default function App() {
     {busy && <ActivityIndicator accessibilityLabel="Working" />}
     {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
     {!!message && <Text accessibilityRole="alert" style={styles.verified}>{message}</Text>}
-    {!account ? <Button title="Sign in with Onesa" disabled={busy} onPress={()=>{void model.current?.connect(true);}} /> : <>
+    {!account ? <>
+      <Button title="Sign in with Onesa" disabled={busy || registering} onPress={()=>{void model.current?.connect(true);}} />
+      <Button title="Create an Onesa account" disabled={busy || registering} onPress={()=>{void register("user");}} />
+      <Button title="Request administrator access" disabled={busy || registering} onPress={()=>{void register("admin");}} />
+    </> : <>
       <Text style={styles.muted}>{account.name}</Text>
       <View style={styles.stopPanel}>
         <Button title={stopping ? 'STOP request in progress' : 'STOP simulator now'} color="#a32222" disabled={stopping} onPress={()=>{void model.current?.stop();}}/>
