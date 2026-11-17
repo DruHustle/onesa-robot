@@ -1,6 +1,6 @@
 const registered = "onesarobot://account/registered";
 
-export async function registerWithOnesa(openBrowser, platform, audience, resume, origin = "https://auth.onesa.eu") {
+export async function registerWithOnesa(openBrowser, platform, audience, resume, origin = "https://account.onesa.eu") {
   if (!["ios", "android"].includes(platform) || !["user", "admin"].includes(audience)) {
     throw new Error("Unsupported registration entry.");
   }
