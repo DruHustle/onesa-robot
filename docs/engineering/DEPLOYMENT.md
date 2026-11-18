@@ -75,6 +75,45 @@ owner recovery procedure. The diagnostic never logs in, clears data, replaces a
 lease, restarts a process or replays a task. Installation and actual hosted
 readback remain separate required steps.
 
+## Owner-local idle journal recovery source
+
+`robot_api.owner_recovery` defines an opt-in factory interface for a separately
+qualified future installation. The ordinary application factory leaves it off;
+there is no environment flag, public route or change to current deployment
+configuration. Its Unix socket requires an exact private directory and socket
+identity, kernel-authenticated root peers, bounded frames and deadlines. The
+runtime checkpoint includes complete terminal history and hashes the current
+session authority without exporting tokens. Nonterminal, duplicate, malformed,
+nonfinite, dirty or unacknowledged history is refused.
+
+The owner adapter verifies the original signed and unrevoked API deployment
+chain, pinned installed files, current qualified source, exact image, container
+and configuration. It retains the complete checkpoint in private custody and
+actually restores that history through the same application image in a bounded,
+network-disabled disposable container. The resulting signed restore record binds
+the installation, process generation, checkpoint and full history. A durable
+signed attempt record is committed before the one-use runtime request. Its
+transaction revalidates the exact signed restore and unrevoked parent chain at
+the durable authorization point. The private bridge checks the previously
+verified kernel peer and socket identity before transmitting a prepare or attempt
+request; the owner also rechecks the independent host process mapping. Ambiguous
+transport never causes an automatic retry. Full history and private evidence stay
+out of terminal output and public release artifacts.
+
+The runtime consumes its short-lived nonce before any awaited mutation, rechecks
+the stopped/idle, dirty-state, authority, history and remaining-budget invariants
+under its existing locks, and uses only the normal conditional lease fence. It
+revokes sessions and leaves operation stopped after successful recovery. It does
+not reset an exhausted budget, bypass a nontransient latch, release another
+owner's lease, restore permission, restart a container or enable commands.
+
+This interface cannot prove the unavailable memory of an older installed process.
+Missing checkpoints, incompatible installation receipts, nontransient failures
+and exhausted recovery budgets remain refused. Source and CI qualification do not
+authorize an installation, assert a current hosted recovery, or replace the normal
+independent staging and production acceptance requirements. Operational use and
+retention procedures belong in the protected guide.
+
 ## Shared identity release profile
 
 The explicit `shared-identity-v1` owner plan binds the candidate and installed

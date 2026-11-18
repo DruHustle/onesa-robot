@@ -6,6 +6,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from evidence import PRODUCT
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -101,7 +103,7 @@ for (const privateRepo of [false, true]) {
 }
 """
         result = subprocess.run(
-            ["node", "-e", program, json.dumps(conditions), "DruHustle/" + ROOT.name],
+            ["node", "-e", program, json.dumps(conditions), "DruHustle/" + PRODUCT],
             capture_output=True,
             text=True,
             check=False,
@@ -111,7 +113,7 @@ for (const privateRepo of [false, true]) {
     def test_registered_staging_entrypoint_supports_private_free_without_production(
         self,
     ):
-        name = "release-candidate.yml" if ROOT.name.endswith("robot") else "deploy.yml"
+        name = "release-candidate.yml" if PRODUCT.endswith("robot") else "deploy.yml"
         text = (ROOT / ".github/workflows" / name).read_text()
         staging = re.split(
             r"(?m)^  [A-Za-z0-9_-]+:", text.split("\n  staging:\n", 1)[1], maxsplit=1
@@ -135,7 +137,7 @@ for (const privateRepo of [true, false]) {
 }
 """
         result = subprocess.run(
-            ["node", "-e", program, condition, "DruHustle/" + ROOT.name],
+            ["node", "-e", program, condition, "DruHustle/" + PRODUCT],
             capture_output=True,
             text=True,
             check=False,
@@ -181,7 +183,7 @@ for (const privateRepo of [true, false]) {
             "onesa-company-portal": "verify.yml",
             "onesa-ai-platform": "ci.yml",
             "onesa-robot": "scaffold.yml",
-        }[ROOT.name]
+        }[PRODUCT]
         for name in (ci, "repository-hygiene.yml"):
             text = (ROOT / ".github/workflows" / name).read_text()
             self.assertNotIn("local-validation", text)
@@ -219,7 +221,7 @@ if(new Function('github','vars','return ('+conditions[0]+')')(github,vars))proce
                 "-e",
                 program,
                 json.dumps([condition, *staging_conditions]),
-                "DruHustle/" + ROOT.name,
+                "DruHustle/" + PRODUCT,
             ],
             capture_output=True,
             text=True,
@@ -261,7 +263,7 @@ class HostedOnlyRunnerRemovalTests(unittest.TestCase):
             "onesa-company-portal": "verify.yml",
             "onesa-ai-platform": "ci.yml",
             "onesa-robot": "scaffold.yml",
-        }[ROOT.name]
+        }[PRODUCT]
         text = (ROOT / ".github/workflows" / ci).read_text()
         job = text.split("  changes:\n", 1)[1]
         condition = re.search(r"^    if: (.+)", job, re.MULTILINE).group(1)
@@ -276,7 +278,10 @@ for(const privateRepo of [false,true]) for(const allowance of ['', 'false', 'tru
 }
 """
         result = subprocess.run(
-            ["node", "-e", program, condition], capture_output=True, text=True
+            ["node", "-e", program, condition],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -301,6 +306,7 @@ for(const condition of JSON.parse(process.argv[1])) {
 """
         result = subprocess.run(
             ["node", "-e", program, json.dumps(conditions)],
+            check=False,
             capture_output=True,
             text=True,
         )

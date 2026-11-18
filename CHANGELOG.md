@@ -1,8 +1,34 @@
 # Changelog
 
+- Robot console and installed simulator clients resume shared sign-in after Onesa user or administrator registration.
+
 - The hosted console sends account creation and sign-in to Company Portal and refuses local operator passwords. Loopback simulations retain their operator fixture.
 
 ## Unreleased
+
+- Require native simulator reset to verify simulation mode, no active legacy task, terminal task history, and an idle, healthy 33-axis simulator with physical actuation explicitly false. Regression cases reject incomplete acknowledgements, live mode, active work, faulted humanoid state and uncertain physical-actuation readback.
+
+- Make the native Robot API origin an explicit build-time Expo setting. Staging bundles can target the exact approved HTTPS Render staging API origin instead of silently calling production; only the production and staging service origins are allowlisted, and malformed, insecure, path-bearing and off-origin overrides fail closed. The production origin remains the default for production builds. Regression coverage checks accepted staging origins and rejected unsafe overrides. Internal Android/iOS CI builds now receive the exact approved staging API origin and verify that it is embedded in each retained bundle, preventing a test artifact from silently targeting production.
+
+
+- Preserve precise terminal integrity classification when the safety tick retires
+  malformed inspection evidence. Legacy proposal corruption remains
+  `proposal_integrity`; malformed inspection extensions become
+  `inspection_integrity`, with original journal bytes preserved. Regression
+  tests also assert that expired proposals are terminally cancelled before any
+  approval attempt and that MFA step-up works after a prior MFA-authorized reset.
+
+- Support native same-account Onesa MFA step-up for simulation approval and
+  Stop reset. The native client refreshes its rotated product session/CSRF only
+  after backend verification; regressions reject a different subject or a
+  non-MFA assertion without replacing the existing session.
+
+- Expire abandoned legacy-joint and inspection proposals in the safety tick.
+  Stale timestamps become terminal cancelled history; malformed proposal bytes
+  are preserved with a terminal integrity reason. Cleanup is deferred while the
+  remote journal is failed. Regression coverage proves expired proposals no
+  longer block MFA step-up and cannot be approved or replayed.
+
 
 - Preserve a masked sign-in password typed while the initial anonymous session
   lookup is pending. Its 401 no longer clears the field before the user submits;

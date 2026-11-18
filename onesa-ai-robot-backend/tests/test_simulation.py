@@ -121,7 +121,10 @@ def test_completion_requires_heartbeat_no_replay_and_explicit_stop_reset(api):
     assert status["mode"] == "simulation"
     assert status["physical_actuation"] is False
     assert status["position_radians"] == pytest.approx(0.1)
-    assert api.get("/api/v1/tasks").json()["tasks"][0]["state"] == "completed"
+    completed = api.get("/api/v1/tasks").json()["tasks"][0]
+    assert completed["state"] == "completed"
+    assert api.post(f"/api/v1/tasks/{task_id}/cancel").status_code == 409
+    assert api.get("/api/v1/tasks").json()["tasks"][0] == completed
     approve(api, proposal(target_radians=0.2))
     assert api.post("/api/v1/stop").status_code == 200
     assert api.get("/api/v1/status").json()["stopped"]
@@ -140,6 +143,36 @@ def test_watchdog_stops_and_does_not_resume_after_reconnection(api):
     assert api.get("/api/v1/tasks").json()["tasks"][0]["reason"] == "operator_connection_lost"
     api.post("/api/v1/heartbeat")
     assert api.get("/api/v1/status").json()["active_task"] is None
+
+
+def test_reset_requires_an_already_stopped_simulator(api):
+    login(api)
+    reset(api)
+    before = api.get("/api/v1/status").json()
+    response = api.post("/api/v1/reset", json={"password": PASSWORD})
+    assert response.status_code == 409
+    after = api.get("/api/v1/status").json()
+    assert after["stopped"] is False and after["active_task"] == before["active_task"]
+
+
+@pytest.mark.parametrize("pending_state", ["proposed", "running"])
+def test_reset_rejects_persisted_nonterminal_history_without_an_active_task(api, pending_state):
+    login(api)
+    reset(api)
+    task_id = api.post("/api/v1/tasks", json=proposal()).json()["id"]
+    assert api.post("/api/v1/stop").status_code == 200
+
+    def retain_unacknowledged_row():
+        sim = api.app.state.sim
+        assert sim.stopped and sim.active is None
+        sim.db.execute("UPDATE tasks SET state=? WHERE id=?", (pending_state, task_id))
+        sim.db.commit()
+
+    api.portal.call(retain_unacknowledged_row)
+    response = api.post("/api/v1/reset", json={"password": PASSWORD})
+    assert response.status_code == 409
+    assert api.get("/api/v1/status").json()["stopped"] is True
+    assert api.get("/api/v1/tasks").json()["tasks"][0]["state"] == pending_state
 
 
 @pytest.mark.parametrize("method,path", [("GET", "/api/v1/status"), ("POST", "/api/v1/heartbeat")])
@@ -176,6 +209,7 @@ def test_session_revocation_cancel_restart_and_expiry(config):
         reset(first)
         task_id = approve(first, proposal(duration_seconds=5))
         assert first.post(f"/api/v1/tasks/{task_id}/cancel").status_code == 200
+        assert first.post(f"/api/v1/tasks/{task_id}/cancel").json()["status"] == "cancelled"
         reset(first)
         approve(first, proposal(duration_seconds=5))
         assert first.post("/api/v1/auth/logout").status_code == 200
@@ -241,8 +275,12 @@ def test_approval_rechecks_staleness_and_owner(api):
 
     api.portal.call(replace_proposal)
     assert (
-        api.post(f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD}).status_code == 422
+        api.post(f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD}).status_code == 409
     )
+    expired_task = next(
+        task for task in api.get("/api/v1/tasks").json()["tasks"] if task["id"] == task_id
+    )
+    assert (expired_task["state"], expired_task["reason"]) == ("cancelled", "proposal_expired")
 
     def change_owner():
         sim.db.execute("UPDATE tasks SET owner='different-operator' WHERE id=?", (task_id,))
@@ -483,3 +521,49 @@ def test_cancelled_hash_caller_retains_capacity_until_worker_finishes(monkeypatc
         assert await verifier.verify(PASSWORD, HASH)
 
     asyncio.run(exercise())
+
+
+def test_expired_and_malformed_unapproved_proposals_are_terminal(api):
+    login(api)
+    reset(api)
+    created = api.post("/api/v1/tasks", json=proposal())
+    assert created.status_code == 201, created.text
+    task_id = created.json()["id"]
+    sim = api.app.state.sim
+
+    def expire():
+        row = sim.db.execute("SELECT proposal FROM tasks WHERE id=?", (task_id,)).fetchone()
+        stale = Proposal.model_validate_json(row["proposal"]).model_copy(
+            update={"issued_at": time.time() - 16}
+        )
+        sim.db.execute(
+            "UPDATE tasks SET proposal=? WHERE id=?",
+            (stale.model_dump_json(), task_id),
+        )
+        sim.db.commit()
+
+    api.portal.call(expire)
+    history = api.get("/api/v1/tasks").json()["tasks"]
+    expired = next(task for task in history if task["id"] == task_id)
+    assert (expired["state"], expired["reason"]) == ("cancelled", "proposal_expired")
+    approval = api.post(f"/api/v1/tasks/{task_id}/approve", json={"password": PASSWORD})
+    assert approval.status_code == 409
+
+    corrupt = api.post("/api/v1/tasks", json=proposal())
+    assert corrupt.status_code == 201, corrupt.text
+    corrupt_id = corrupt.json()["id"]
+
+    def corrupt_proposal():
+        sim.db.execute("UPDATE tasks SET proposal=? WHERE id=?", ("{malformed", corrupt_id))
+        sim.db.commit()
+
+    api.portal.call(corrupt_proposal)
+    history = api.get("/api/v1/tasks").json()["tasks"]
+    terminal = next(task for task in history if task["id"] == corrupt_id)
+    assert (terminal["state"], terminal["reason"]) == ("cancelled", "proposal_integrity")
+    raw = api.portal.call(
+        lambda: sim.db.execute("SELECT proposal FROM tasks WHERE id=?", (corrupt_id,)).fetchone()[
+            "proposal"
+        ]
+    )
+    assert raw == "{malformed"
