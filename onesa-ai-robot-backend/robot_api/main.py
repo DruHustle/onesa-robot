@@ -9,11 +9,13 @@ import secrets
 import sqlite3
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID, uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -25,6 +27,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from robot_api import humanoid, inspection
 from robot_api import onesa_identity as identity
 from robot_api.edge import EdgeMonitor, Telemetry
+from robot_api.owner_recovery import (
+    OwnerRecovery,
+    OwnerRecoveryConfiguration,
+    OwnerRecoveryServer,
+)
 from robot_api.safety import Proposal, SafetyGate, SafetyViolation
 from robot_api.security import PasswordVerifier, VerificationBusy, token_hash
 from robot_api.turso import (
@@ -145,6 +152,13 @@ class Settings(BaseSettings):
             raise ValueError("Invalid operator password hash")
         return self
 
+    identity_audience: str = Field(default="", validation_alias="ONESA_IDENTITY_AUDIENCE")
+    identity_public_jwks: str = Field(default="", validation_alias="ONESA_IDENTITY_JWKS")
+    identity_mapping_issuer: str = Field(
+        default="", validation_alias="ONESA_IDENTITY_MAPPING_ISSUER"
+    )
+    identity_account_url: str = Field(default="", validation_alias="ONESA_IDENTITY_ACCOUNT_URL")
+
     def identity_configuration(self) -> identity.IdentityConfig:
         return identity.IdentityConfig(
             issuer=self.identity_issuer,
@@ -152,6 +166,10 @@ class Settings(BaseSettings):
             client_secret=self.identity_client_secret.get_secret_value(),
             redirect_uri=self.identity_callback_url,
             product="robot",
+            audience=self.identity_audience,
+            public_jwks=self.identity_public_jwks,
+            mapping_issuer=self.identity_mapping_issuer,
+            account_url=self.identity_account_url,
             allow_local_http=self.deployment_environment == "local",
         )
 
@@ -171,9 +189,17 @@ class Confirmation(BaseModel):
 class IdentityStart(BaseModel):
     model_config = ConfigDict(extra="forbid")
     step_up: bool = False
+    mobile: bool = False
+
+
+class MobileExchange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    state: str = Field(pattern=r"^native_[A-Za-z0-9_-]{43}$")
+    code: str = Field(min_length=1, max_length=4096)
 
 
 class IdentityConfigurationResponse(BaseModel):
+    authorization_endpoint: str | None = None
     enabled: bool
     account_url: str | None = None
 
@@ -184,6 +210,7 @@ class IdentityStartResponse(BaseModel):
 
 @dataclass(frozen=True)
 class IdentityFlow:
+    nonce: str
     browser_hash: str
     verifier: str = field(repr=False)
     expires: float
@@ -228,6 +255,10 @@ class MissionCatalog(BaseModel):
 
 
 class SessionResponse(BaseModel):
+    id: str = Field(
+        pattern=r"^robot_[0-9a-f]{64}$",
+        description="Opaque stable Robot account identity; display name is not an ownership key.",
+    )
     csrf: str
     name: str
     role: Literal["viewer", "operator", "administrator"] = "operator"
@@ -323,6 +354,7 @@ class State:
         self.journal_version = 0
         self.journal_lock = asyncio.Lock()
         self.journal_failed = False
+        self.journal_failure_metadata: dict[str, Any] | None = None
         self.journal_recovery_allowed = False
         self.journal_recovery_attempts = 0
         self.journal_recovery_next_at = 0.0
@@ -447,6 +479,14 @@ class State:
                 if isinstance(error, JournalFailure)
                 else JournalFailure(category, phase, elapsed_ms)
             )
+            self.journal_failure_metadata = {
+                "category": diagnostic.category,
+                "phase": diagnostic.phase,
+                "elapsed_ms": diagnostic.elapsed_ms,
+                "http_status": diagnostic.http_status,
+                "transport_kind": diagnostic.transport_kind,
+                "reconciliation": diagnostic.reconciliation,
+            }
             # Only a known idle renewal transport failure permits a new lease
             # attempt. Never reset this budget on repeated readiness/flush errors.
             self.journal_recovery_allowed = (
@@ -467,7 +507,9 @@ class State:
                 diagnostic.reconciliation,
             )
 
-    async def recover_idle_journal(self) -> bool:
+    async def recover_idle_journal(
+        self, *, owner_guard: Callable[[bool], bool] | None = None
+    ) -> bool:
         """Acquire new ownership after idle failure; never repair or replay tasks."""
         if (
             not self.journal
@@ -496,6 +538,8 @@ class State:
                 is not None
             ):
                 self.journal_recovery_allowed = False
+                return False
+            if owner_guard is not None and not owner_guard(False):
                 return False
             previous = self.journal
             local_rows = self.db.execute(f"SELECT {','.join(COLUMNS)} FROM tasks").fetchall()
@@ -536,6 +580,9 @@ class State:
                         ).fetchone()
                         is not None
                     ):
+                        self.journal_recovery_allowed = False
+                        return False
+                    if owner_guard is not None and not owner_guard(True):
                         self.journal_recovery_allowed = False
                         return False
                     self.db.execute("DELETE FROM sessions")
@@ -640,23 +687,34 @@ class State:
             return
         if not isinstance(payload, dict) or payload.get("inspection") is None:
             return
-        proposal = Proposal.model_validate_json(row["proposal"])
-        record = proposal.inspection
-        if record is None:
-            return
-        active = getattr(self, "active", None)
-        elapsed = record.elapsed_seconds
-        if active is not None and active["id"] == row["id"]:
-            # Prefer the last in-memory observation; a journal failure must not
-            # erase already collected evidence or pretend an execution completed.
-            proposal = active["proposal"]
+        try:
+            proposal = Proposal.model_validate_json(row["proposal"])
             record = proposal.inspection
             if record is None:
-                raise SafetyViolation("Active inspection lost its approved plan")
-            elapsed = max(0.0, time.monotonic() - active["started"])
-        updated = inspection.interrupt(record, reason, time.time(), elapsed)
-        if updated != record:
-            self.save_inspection(row["id"], proposal, updated)
+                return
+            active = getattr(self, "active", None)
+            elapsed = record.elapsed_seconds
+            if active is not None and active["id"] == row["id"]:
+                # Prefer the last in-memory observation; a journal failure must not
+                # erase already collected evidence or pretend an execution completed.
+                proposal = active["proposal"]
+                record = proposal.inspection
+                if record is None:
+                    raise SafetyViolation("Active inspection lost its approved plan")
+                elapsed = max(0.0, time.monotonic() - active["started"])
+            updated = inspection.interrupt(record, reason, time.time(), elapsed)
+            if updated != record:
+                self.save_inspection(row["id"], proposal, updated)
+        except (ValueError, TypeError):
+            # Invalid saved inspection evidence must never prevent Stop, logout,
+            # watchdog failure handling or process-restart cancellation. Keep the
+            # original proposal bytes for diagnosis; do not manufacture a report.
+            self.db.execute(
+                "UPDATE tasks SET state='cancelled',reason='inspection_integrity' "
+                "WHERE id=? AND state IN ('running','proposed')",
+                (row["id"],),
+            )
+            self.dirty(row["id"])
 
     def interrupt_inspections(self, reason: str) -> None:
         for row in self.db.execute("SELECT * FROM tasks WHERE state IN ('running','proposed')"):
@@ -729,7 +787,62 @@ class State:
         self.db.commit()
         self.active = None
 
+    def expire_proposals(self) -> None:
+        # An unapproved proposal is useful only inside the same freshness window
+        # enforced by SafetyGate.validate(). Retire abandoned/corrupt records so
+        # they cannot indefinitely block MFA step-up, humanoid work or permission.
+        # A failed remote journal must remain fail-closed and must not accumulate
+        # unacknowledged cleanup writes that would prevent fenced recovery.
+        if self.journal_failed:
+            return
+        now = time.time()
+        changed = False
+        rows = self.db.execute("SELECT id,proposal FROM tasks WHERE state='proposed'").fetchall()
+        for row in rows:
+            try:
+                proposal = Proposal.model_validate_json(row["proposal"])
+                age = now - proposal.issued_at
+                if isfinite(age) and -1 <= age <= self.gate.freshness_seconds:
+                    continue
+                reason = (
+                    "proposal_invalid_timestamp"
+                    if not isfinite(age) or age < -1
+                    else "proposal_expired"
+                )
+                if proposal.inspection is not None:
+                    self.interrupt_inspection(row, reason)
+            except (ValueError, TypeError):
+                # Keep the original proposal bytes for diagnosis. Distinguish a
+                # corrupt inspection extension from an invalid legacy proposal.
+                try:
+                    payload = json.loads(row["proposal"])
+                except (ValueError, TypeError):
+                    payload = None
+                reason = (
+                    "inspection_integrity"
+                    if isinstance(payload, dict) and payload.get("inspection") is not None
+                    else "proposal_integrity"
+                )
+            current = self.db.execute("SELECT state FROM tasks WHERE id=?", (row["id"],)).fetchone()
+            if current is None:
+                continue
+            if current["state"] == "proposed":
+                updated = self.db.execute(
+                    "UPDATE tasks SET state='cancelled',reason=? WHERE id=? AND state='proposed'",
+                    (reason, row["id"]),
+                )
+                if updated.rowcount:
+                    self.dirty(row["id"])
+                    changed = True
+            elif current["state"] == "cancelled":
+                # interrupt_inspection() may already have terminally cancelled
+                # corrupt inspection evidence and queued its durable journal write.
+                changed = True
+        if changed:
+            self.db.commit()
+
     def tick(self) -> None:
+        self.expire_proposals()
         whole = self.humanoid
         owner = whole.active.owner if whole.active else whole.pending[0] if whole.pending else None
         if owner:
@@ -803,7 +916,11 @@ class State:
 Session = dict[str, Any]
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    owner_recovery: OwnerRecoveryConfiguration | None = None,
+) -> FastAPI:
     config = settings or Settings()
     identity_config = config.identity_configuration() if config.identity_enabled else None
     local_simulator = urlsplit(config.public_origin).hostname in {"localhost", "127.0.0.1", "::1"}
@@ -877,26 +994,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         journal_task = asyncio.create_task(journal_watch()) if state.journal else None
         task = asyncio.create_task(watch())
         app.state.watch = task
+        recovery_server = None
         try:
+            # No environment variable, HTTP request or default configuration can
+            # enable this owner-local channel. A future qualified factory must
+            # explicitly supply its immutable installation/runtime binding.
+            if owner_recovery is not None:
+                recovery_server = OwnerRecoveryServer(
+                    OwnerRecovery(state, owner_recovery, lambda: not task.done())
+                )
+                await recovery_server.start()
             yield
         finally:
             try:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+                if recovery_server:
+                    await recovery_server.close()
             finally:
                 try:
-                    if journal_task:
-                        journal_task.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await journal_task
-                    state.cancel("process_shutdown", stop=True)
-                    with contextlib.suppress(sqlite3.Error):
-                        await state.flush_journal()
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
                 finally:
-                    state.db.close()
-                    if state.journal:
-                        await state.journal.close()
+                    try:
+                        if journal_task:
+                            journal_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await journal_task
+                        state.cancel("process_shutdown", stop=True)
+                        with contextlib.suppress(sqlite3.Error):
+                            await state.flush_journal()
+                    finally:
+                        state.db.close()
+                        if state.journal:
+                            await state.journal.close()
 
     app = FastAPI(
         title="Onesa Robot Simulation API",
@@ -1009,7 +1139,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     def identity_owner(principal: identity.Identity) -> str:
         # Email is a display/contact attribute, never an account-linking key.
-        value = principal.issuer + "\x00" + principal.subject
+        namespace = (identity_config.mapping_issuer if identity_config else "") or principal.issuer
+        value = namespace + "\x00" + principal.subject
         return "sso:" + hashlib.sha256(value.encode()).hexdigest()
 
     def identity_role(
@@ -1260,12 +1391,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "deployment_environment": config.deployment_environment,
         }
 
-    @app.get("/api/v1/auth/identity/config", response_model=IdentityConfigurationResponse)
+    @app.get(
+        "/api/v1/auth/identity/config",
+        response_model=IdentityConfigurationResponse,
+        response_model_exclude_unset=True,
+    )
     async def identity_configuration():
         issuer = urlsplit(identity_config.issuer) if identity_config else None
         return {
             "enabled": identity_config is not None,
-            "account_url": f"{issuer.scheme}://{issuer.netloc}/account" if issuer else None,
+            **(
+                {"authorization_endpoint": identity_config.issuer + "authorize"}
+                if identity_config and identity_config.audience
+                else {}
+            ),
+            "account_url": (
+                identity_config.account_url or f"{issuer.scheme}://{issuer.netloc}/account"
+            )
+            if issuer and identity_config
+            else None,
         }
 
     @app.post("/api/v1/auth/identity/start", response_model=IdentityStartResponse)
@@ -1302,8 +1446,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(429, "Sign-in is busy. Please wait before trying again")
         attempts.append(time.monotonic())
         state_value, nonce, verifier = identity.new_transaction()
+        if value.mobile:
+            # Native step-up uses the same one-use deep-link transaction. The
+            # existing finish_identity path binds it to the live subject and
+            # requires fresh central MFA before replacing the current session.
+            state_value = "native_" + state_value
         browser = secrets.token_urlsafe(32)
         sim.identity_flows[token_hash(state_value)] = IdentityFlow(
+            nonce=nonce,
             browser_hash=token_hash(browser),
             verifier=verifier,
             expires=now + 600,
@@ -1344,7 +1494,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.headers["location"] = "/console?identity=failed"
             return response
         state_value = request.query_params.get("state", "")
-        flow = sim.identity_flows.pop(token_hash(state_value), None)
+        if state_value.startswith("native_"):
+            pending = sim.identity_flows.get(token_hash(state_value))
+            if (
+                not pending
+                or pending.expires <= time.time()
+                or request.query_params.get("iss", identity_config.issuer) != identity_config.issuer
+            ):
+                raise HTTPException(400, "Start sign-in again")
+            params = {"state": state_value}
+            code = request.query_params.get("code", "")
+            if "error" in request.query_params or not code or len(code) > 4096:
+                params["error"] = "cancelled"
+            else:
+                params["code"] = code
+            return RedirectResponse(
+                "onesarobot://account/callback?" + urlencode(params), status_code=303
+            )
+        return await finish_identity(
+            request, response, state_value, request.query_params.get("code", "")
+        )
+
+    @app.post("/api/v1/auth/identity/mobile/exchange", include_in_schema=False)
+    async def mobile_exchange(data: MobileExchange, request: Request):
+        response = JSONResponse({"signed_in": True}, headers={"cache-control": "no-store"})
+        response.delete_cookie("robot_identity", path="/api/v1/auth/identity")
+        result = await finish_identity(request, response, data.state, data.code)
+        if "location" in result.headers:
+            raise HTTPException(401, "Start Onesa sign-in again")
+        return result
+
+    async def finish_identity(request: Request, response: Response, state_value: str, code: str):
+        if identity_config is None:
+            raise HTTPException(404, "Onesa sign-in is not configured")
+        sim = state(request)
+        flow = sim.identity_flows.get(token_hash(state_value))
         if (
             flow is None
             or flow.expires <= time.time()
@@ -1356,14 +1540,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ):
             response.headers["location"] = "/console?identity=failed"
             return response
+        del sim.identity_flows[token_hash(state_value)]
         access_token: str | None = None
         try:
-            access_token = await asyncio.to_thread(
-                identity.exchange_code,
-                identity_config,
-                request.query_params.get("code", ""),
-                flow.verifier,
-            )
+            if identity_config.audience:
+                from robot_api.managed_oidc import exchange
+
+                access_token = await asyncio.to_thread(
+                    exchange,
+                    identity_config,
+                    code,
+                    flow.verifier,
+                    flow.nonce,
+                )
+            else:
+                access_token = await asyncio.to_thread(
+                    identity.exchange_code,
+                    identity_config,
+                    code,
+                    flow.verifier,
+                )
             principal = await asyncio.to_thread(
                 identity.validate_session, identity_config, access_token
             )
@@ -1467,11 +1663,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             samesite="strict",
             path="/api/v1",
         )
-        return {"csrf": csrf, "name": value.name, "role": role({"name": value.name})}
+        return {
+            "id": account_id(value.name),
+            "csrf": csrf,
+            "name": value.name,
+            "role": role({"name": value.name}),
+        }
+
+    def account_id(owner: str) -> str:
+        # Managed session names are the existing issuer/subject ownership hash,
+        # not display names or email. Keep that namespace and existing journal
+        # ownership intact while exposing a product-scoped opaque client key.
+        return "robot_" + hashlib.sha256(("robot-account-v1\x00" + owner).encode()).hexdigest()
 
     @app.get("/api/v1/auth/me", response_model=SessionResponse)
     async def me(operator: Operator):
         return {
+            "id": account_id(operator["name"]),
             "csrf": operator["csrf"],
             "name": operator.get("display_name", operator["name"]),
             "role": role(operator),
@@ -1986,7 +2194,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
 
-    @app.post("/api/v1/tasks/{task_id}/cancel", response_model=ActionResponse)
+    @app.post(
+        "/api/v1/tasks/{task_id}/cancel",
+        response_model=ActionResponse,
+        responses={409: {"model": ServiceError, "description": "The task has already completed."}},
+    )
     async def cancel(task_id: str, request: Request, operator: Operator):
         sim = state(request)
         row = sim.db.execute(
@@ -1994,6 +2206,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ).fetchone()
         if row is None:
             raise HTTPException(404, "Task not found")
+        if row["state"] == "completed":
+            raise HTTPException(409, "The task has already completed")
         if row["state"] == "running" or (sim.active and sim.active["id"] == task_id):
             sim.cancel("operator_cancel", stop=True)
         elif row["state"] == "proposed":
@@ -2023,7 +2237,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(503, "Remote simulation journal requires recovery")
         if sim.stop_epoch != stop_epoch:
             raise HTTPException(409, "Stop changed during reset confirmation")
-        if sim.active or sim.humanoid.active or sim.humanoid.pending:
+        if not sim.stopped:
+            raise HTTPException(409, "Simulator is not stopped")
+        if (
+            sim.active
+            or sim.humanoid.active
+            or sim.humanoid.pending
+            or sim.db.execute(
+                "SELECT count(*) FROM tasks WHERE state IN ('proposed','running')"
+            ).fetchone()[0]
+        ):
             raise HTTPException(409, "Cancel the current task first")
         sim.humanoid.verified_positions()
         sim.db.execute("UPDATE safety SET stopped=0 WHERE id=1")

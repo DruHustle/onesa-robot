@@ -30,6 +30,15 @@ SQLite REAL conversion. History reads use a lossless text projection before exac
 comparison; schema checks, ownership fences and bounded recovery remain enforced.
 This source correction is not evidence of a deployed recovery or a history rewrite.
 
+The source also defines an optional owner-local checkpoint and idle journal
+recovery interface for future qualified installations. It is disabled in the
+ordinary application factory, has no public HTTP route or environment switch, and
+cannot inspect or recover a legacy process that lacks the supported checkpoint.
+An already eligible stopped simulator can use only its remaining bounded recovery
+budget after exact private history, signed custody and isolated restore proofs.
+No task replay, process restart, forced lease release or physical permission is
+provided. See the [source boundary](docs/engineering/DEPLOYMENT.md#owner-local-idle-journal-recovery-source).
+
 Production API hosting moved to the existing Oracle Free VM on 2026-10-16; the
 Vercel frontend and existing data services remain. See the
 [verified hosting cutover](docs/engineering/DEPLOYMENT.md)

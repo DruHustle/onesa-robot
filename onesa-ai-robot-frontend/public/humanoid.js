@@ -3,6 +3,10 @@ import {RobotClient} from './client.js';
 const client = new RobotClient();
 const $ = id => document.getElementById(id);
 const panel = $('humanoid');
+window.addEventListener('onesa:stop-requested',()=>{
+  ++epoch;client.cancelPending();reading=false;busy=false;observation=null;review(null);haltRequired=true;controls();
+});
+window.addEventListener('onesa:stop-verified',()=>{if(panel.open)void refresh(true);});
 let epoch = 0, model = null, observation = null, busy = false, reading = false;
 let supervising = false, haltRequired = false, stopping = null, reviewedPlan = null;
 const label = value => value.replaceAll('_', ' ');
@@ -146,24 +150,31 @@ function stop(keepalive=false) {
   if(stopping)return stopping;
   haltRequired=true;
   const stopper=new RobotClient();stopper.csrf=client.csrf;
+  let verified=false;
   stopping=stopper.stop(keepalive).then(value=>{
-    if(value.status!=='stopped')throw new Error('Stop acknowledgement could not be verified.');
+    if(value.status!=='stopped'||value.physical_actuation!==false)throw new Error('Stop acknowledgement could not be verified.');
     supervising=false;
-  }).finally(()=>{stopping=null;controls();});
+    verified=!keepalive;
+  }).finally(()=>{
+    stopping=null;controls();
+    if(verified)window.dispatchEvent(new Event('onesa:stop-verified'));
+  });
   controls();return stopping;
 }
 $('humanoid-stop').addEventListener('click',()=>{
-  const current=++epoch;client.cancelPending();reading=false;busy=false;
-  observation=null;review(null);
-  void stop().then(()=>current===epoch&&refresh()).catch(error=>{if(current===epoch)$('humanoid-state').textContent=error.message;});
+  window.dispatchEvent(new Event('onesa:stop-requested'));
+  void stop().catch(error=>{$('humanoid-state').textContent=error.message;});
 });
 $('humanoid-neutral').addEventListener('click',()=>{for(const input of $('humanoid-joints').querySelectorAll('input'))input.value='0';});
 function depart() {
   // Include unresolved mutations and stale observations: aborting a fetch does
   // not undo a proposal or approval that the server has already accepted.
-  if(client.csrf&&(supervising||busy||haltRequired))void stop(true).catch(()=>{
-    $('notice').textContent='Humanoid Stop could not be confirmed. Its supervision heartbeat is paused; verify the stopped state after reconnecting.';
-  });
+  if(client.csrf&&(supervising||busy||haltRequired)){
+    window.dispatchEvent(new Event('onesa:stop-requested'));
+    void stop(true).catch(()=>{
+      $('notice').textContent='Humanoid Stop could not be confirmed. Its supervision heartbeat is paused; verify the stopped state after reconnecting.';
+    });
+  }
   clear();
 }
 panel.addEventListener('toggle',()=>{if(panel.open)void load();else depart();});

@@ -616,6 +616,17 @@
             ],
             "title": "Account Url"
           },
+          "authorization_endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Endpoint"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -630,6 +641,11 @@
       "IdentityStart": {
         "additionalProperties": false,
         "properties": {
+          "mobile": {
+            "default": false,
+            "title": "Mobile",
+            "type": "boolean"
+          },
           "step_up": {
             "default": false,
             "title": "Step Up",
@@ -2681,6 +2697,12 @@
             "title": "Global Administrator",
             "type": "boolean"
           },
+          "id": {
+            "description": "Opaque stable Robot account identity; display name is not an ownership key.",
+            "pattern": "^robot_[0-9a-f]{64}$",
+            "title": "Id",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -2697,6 +2719,7 @@
           }
         },
         "required": [
+          "id",
           "csrf",
           "name"
         ],
@@ -4269,6 +4292,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "The task has already completed."
           },
           "422": {
             "content": {

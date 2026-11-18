@@ -7,7 +7,7 @@ import vm from 'node:vm';
 // form, as it can during WebKit button clicks. No backend or credentials enter.
 async function fixture() {
  const source=(await readFile(new URL('../public/app.js',import.meta.url),'utf8')).replace(/^import .*$/gm,'');
- const handlers=new Map(),nodes=new Map(),calls={reset:0,stop:0,logout:0,cancel:0,login:0};
+ const handlers=new Map(),windowHandlers=new Map(),nodes=new Map(),calls={reset:0,stop:0,logout:0,cancel:0,login:0};
  const form={querySelectorAll:()=>[],setAttribute(){},removeAttribute(){}};
  const unrelated={querySelectorAll:()=>[],setAttribute(){},removeAttribute(){}};
  let resolveReset;
@@ -21,8 +21,11 @@ async function fixture() {
   stop(){calls.stop++;return Promise.resolve({});}
   logout(){calls.logout++;return Promise.resolve({});}
   cancel(){calls.cancel++;return Promise.resolve({});}
+  cancelPending(){}
  }
- const context={RobotClient,createInspection:()=>({reset(){},authenticate(){},stale(){},refresh(){},hasPending(){return false;}}),document:{addEventListener(){},getElementById:node,activeElement:{closest:()=>unrelated},querySelectorAll:()=>[],createElement:()=>node('li')},window:{location:{hostname:"localhost"},addEventListener(){}},setInterval(){return 1;},clearInterval(){},AbortController,AbortSignal,setTimeout,Date,performance};
+ class Event { constructor(type){this.type=type;} }
+ const window={location:{hostname:"localhost"},addEventListener(type,handler){const list=windowHandlers.get(type)||[];list.push(handler);windowHandlers.set(type,list);},dispatchEvent(event){for(const handler of windowHandlers.get(event.type)||[])handler(event);return true;}};
+ const context={RobotClient,Event,createInspection:()=>({reset(){},authenticate(){},stale(){},refresh(){},hasPending(){return false;}}),document:{addEventListener(){},getElementById:node,activeElement:{closest:()=>unrelated},querySelectorAll:()=>[],createElement:()=>node('li')},window,setInterval(){return 1;},clearInterval(){},AbortController,AbortSignal,setTimeout,Date,performance};
  vm.createContext(context);vm.runInContext(source,context);
  function submit(){const event={currentTarget:form,preventDefault(){}};handlers.get('reset-form:submit')(event);event.currentTarget=null;}
  const tick=()=>new Promise(resolve=>setImmediate(resolve));

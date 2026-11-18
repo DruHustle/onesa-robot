@@ -802,11 +802,18 @@ export interface components {
         IdentityConfigurationResponse: {
             /** Account Url */
             account_url?: string | null;
+            /** Authorization Endpoint */
+            authorization_endpoint?: string | null;
             /** Enabled */
             enabled: boolean;
         };
         /** IdentityStart */
         IdentityStart: {
+            /**
+             * Mobile
+             * @default false
+             */
+            mobile: boolean;
             /**
              * Step Up
              * @default false
@@ -2154,6 +2161,11 @@ export interface components {
              * @default false
              */
             global_administrator: boolean;
+            /**
+             * Id
+             * @description Opaque stable Robot account identity; display name is not an ownership key.
+             */
+            id: string;
             /** Name */
             name: string;
             /**
@@ -3329,6 +3341,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActionResponse"];
+                };
+            };
+            /** @description The task has already completed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceError"];
                 };
             };
             /** @description Validation Error */
