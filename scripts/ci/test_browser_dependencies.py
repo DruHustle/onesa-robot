@@ -177,6 +177,19 @@ class BrowserDependenciesTests(unittest.TestCase):
             )
             self.assertEqual(browser.prepare(root)["mirror_URIs_updated"], 0)
 
+    def test_direct_regional_source_rewrites_to_signed_https_canonical(self):
+        text = (
+            "Types: deb\nURIs: http://us-east-2.ec2.archive.ubuntu.com/ubuntu/\n"
+            "Suites: noble noble-updates\nComponents: main universe\n"
+            "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
+        )
+        updated, changed = browser.rewrite_sources(text, True)
+        self.assertEqual(changed, 1)
+        self.assertIn("URIs: https://archive.ubuntu.com/ubuntu/", updated)
+        self.assertIn("Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg", updated)
+        self.assertIn("Suites: noble noble-updates", updated)
+        self.assertEqual(browser.rewrite_sources(updated, True), (updated, 0))
+
     def test_mirror_list_rejects_custom_entries_or_missing_canonical_archive(self):
         for text in [
             "http://azure.archive.ubuntu.com/ubuntu/ priority:1\n",
@@ -187,7 +200,7 @@ class BrowserDependenciesTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 browser.rewrite_mirror_list(text)
 
-    def test_observed_regional_mirror_preserves_existing_sources_and_priority(self):
+    def test_observed_regional_mirror_prefers_canonical_signed_archive(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             apt, source = self.fixture(root)
@@ -197,30 +210,34 @@ class BrowserDependenciesTests(unittest.TestCase):
             )
             before = source.read_bytes()
             mirror = apt / "apt-mirrors.txt"
-            content = (
+            mirror.write_text(
                 "http://us-east-2.ec2.archive.ubuntu.com/ubuntu/ priority:1\n"
                 "https://archive.ubuntu.com/ubuntu/ priority:2\n"
                 "https://security.ubuntu.com/ubuntu/ priority:3\n"
             )
-            mirror.write_text(content)
             mirror.chmod(0o644)
-            for _ in range(2):
-                result = browser.prepare(root)
-                self.assertEqual(result["mirror_URIs_updated"], 0)
-                self.assertFalse(result["signing_and_suite_fields_changed"])
-                self.assertEqual(source.read_bytes(), before)
-                self.assertEqual(mirror.read_text(), content)
+            expected = (
+                "https://archive.ubuntu.com/ubuntu/ priority:2\n"
+                "https://security.ubuntu.com/ubuntu/ priority:3\n"
+            )
+            first = browser.prepare(root)
+            self.assertEqual(first["mirror_URIs_updated"], 1)
+            self.assertEqual(first["mirror_list_files_updated"], 1)
+            self.assertFalse(first["signing_and_suite_fields_changed"])
+            self.assertEqual(source.read_bytes(), before)
+            self.assertEqual(mirror.read_text(), expected)
+            self.assertEqual(browser.prepare(root)["mirror_URIs_updated"], 0)
             self.assertEqual(
                 (apt / "apt.conf.d/99-onesa-ci-network").read_text(), browser.NETWORK
             )
 
-    def test_regional_failover_preserves_priority_and_only_removes_azure(self):
+    def test_regional_failover_removes_only_bounded_hosts_and_retains_https(self):
         regional = "http://us-east-2.ec2.archive.ubuntu.com/ubuntu/ priority:1\n"
         azure = "http://azure.archive.ubuntu.com/ubuntu/ priority:2\n"
         canonical = "https://archive.ubuntu.com/ubuntu/ priority:3\n"
         self.assertEqual(
             browser.rewrite_mirror_list(regional + azure + canonical),
-            (regional + canonical, 1),
+            (canonical, 2),
         )
         with self.assertRaisesRegex(ValueError, "signed archive transport"):
             browser.rewrite_mirror_list(regional)
