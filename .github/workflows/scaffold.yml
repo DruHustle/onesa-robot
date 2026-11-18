@@ -84,7 +84,7 @@ jobs:
       run: python3 -m unittest discover -s scripts/release -p 'test_*.py'
     - name: Verify hosting diagnostic redaction and denied access
       run: python3 -m unittest discover -s scripts -p 'test_inspect_hosting.py'
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
@@ -174,7 +174,7 @@ jobs:
         path: ${{ runner.temp }}/robot-browser-diagnostics.json
         retention-days: 1
         if-no-files-found: error
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
