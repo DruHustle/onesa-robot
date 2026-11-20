@@ -64,7 +64,7 @@ async function configureIdentity(){
   const value=await client.identityConfig();identityEnabled=value.enabled===true;
   if(identityEnabled){
    const account=new URL(value.account_url);identityOrigin=account.origin;const link=byId('identity-administrator-link');if(link)link.href=new URL('/admin?product=robot',account).toString();
-   const link=byId('onesa-account-link');if(link){link.href=account.href;link.hidden=false;}
+   const accountLink=byId('onesa-account-link');if(accountLink){accountLink.href=account.href;accountLink.hidden=false;}
    byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
    if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
   }
