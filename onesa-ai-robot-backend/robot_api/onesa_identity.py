@@ -254,8 +254,10 @@ def validate_session(
             for key, value in product_roles.items()
         ):
             raise ValueError("Invalid assertion")
-        product_roles = {key: "admin" if value == "administrator" else value
-                         for key, value in product_roles.items()}
+        product_roles = {
+            key: "admin" if value == "administrator" else value
+            for key, value in product_roles.items()
+        }
         memberships = raw["onesa_memberships"]
         if not isinstance(memberships, list) or len(memberships) > 100:
             raise ValueError("Invalid assertion")
