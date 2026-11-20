@@ -281,10 +281,11 @@ def validate_session(
             dict(product_roles),
             tuple(dict(item) for item in memberships),
         )
-        if ("global_admin" in roles or product_roles.get(config.product) in {"admin", "administrator"}) and not {
-            "otp",
-            "mfa",
-        }.intersection(amr):
+        elevated = (
+            "global_admin" in roles
+            or product_roles.get(config.product) in {"admin", "administrator"}
+        )
+        if elevated and not {"otp", "mfa"}.intersection(amr):
             raise IdentityError(
                 "identity_mfa_required", "Complete MFA for administrator access", 403
             )
