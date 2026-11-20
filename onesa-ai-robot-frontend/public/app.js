@@ -94,7 +94,7 @@ async function readPhysicalPermission(){
  catch(error){if(current!==generation||!administrator||suspended)return;permissionRevision=null;byId('physical-permission-state').textContent='Unavailable · last observation is stale';byId('physical-operation-state').textContent='Unknown · current state unavailable';if(error.status===401)signedOut();}
  finally{if(permissionRead===owner)permissionRead=null;}
 }
-function setAdministrator(session){administrator=session.role==='administrator';permissionRevision=null;permissionRead=null;lastPermissionRead=0;byId('administrator').hidden=!administrator;if(administrator)void readPhysicalPermission();}
+function setAdministrator(session){administrator=session.role==='administrator';const link=byId('identity-administrator-link');if(link)link.hidden=!administrator;permissionRevision=null;permissionRead=null;lastPermissionRead=0;byId('administrator').hidden=!administrator;if(administrator)void readPhysicalPermission();}
 function verifiedObservation(status,tasks){
  return status?.mode==='simulation'&&status.physical_actuation===false&&typeof status.stopped==='boolean'&&
   Number.isFinite(status.position_radians)&&Number.isFinite(status.sampled_at)&&
