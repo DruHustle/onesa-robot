@@ -416,6 +416,21 @@ def test_global_admin_uses_existing_permission_guard_and_revocation(environment)
     assert app.state.sim.physical_permission_owner is None
 
 
+def test_canonical_product_administrator_maps_to_robot_admin_without_enabling_hardware(environment):
+    app, client, issuer, _ = environment
+    principal = person(role="administrator")
+    current = sign_in(client, issuer, principal)
+    assert current["role"] == "administrator" and not current["global_administrator"]
+    before = client.get("/api/v1/admin/physical-operation").json()
+    response = client.post(
+        "/api/v1/admin/physical-operation/allow",
+        json={"confirmed": True, "expected_revision": before["revision"]},
+    )
+    assert response.status_code == 200
+    assert response.json()["physical_actuation"] is False
+    assert response.json()["controller_connection"] == "not_connected"
+
+
 def test_entitlement_removal_revokes_local_session_and_stops_work(environment):
     app, client, issuer, _ = environment
     principal = person()
