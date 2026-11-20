@@ -149,9 +149,10 @@ def test_global_admin_requires_central_mfa_and_retains_freshness():
 
 
 @pytest.mark.parametrize("product", ["ai", "drone", "robot"])
-def test_each_product_administrator_requires_mfa(product):
+@pytest.mark.parametrize("role", ["admin", "administrator"])
+def test_each_product_administrator_requires_mfa(product, role):
     config = replace(CONFIG, product=product)
-    payload = assertion(onesa_applications=[product], onesa_product_roles={product: "admin"})
+    payload = assertion(onesa_applications=[product], onesa_product_roles={product: role})
     with transport(payload) as client:
         with pytest.raises(IdentityError, match="MFA"):
             validate_session(config, TOKEN, client=client)
