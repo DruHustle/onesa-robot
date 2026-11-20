@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Accept the canonical Onesa `administrator` role alongside the legacy `admin` claim. Both require MFA and map to Robot's existing administrator guard. Product grants still do not enable physical actuation.
+
 - Preserve a masked sign-in password typed while the initial anonymous session
   lookup is pending. Its 401 no longer clears the field before the user submits;
   native required-field validation can otherwise prevent the login POST entirely.
