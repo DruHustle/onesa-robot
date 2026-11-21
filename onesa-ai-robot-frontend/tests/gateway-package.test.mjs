@@ -83,9 +83,9 @@ test('API function package serves readiness and anonymous auth without static ou
     const response=await fetch('http://127.0.0.1:'+port+incoming,{signal:AbortSignal.timeout(3000)});
     assert.equal(response.status,404,incoming);
   }
-  // Unknown allowlisted route may be rejected by the upstream; other invalid
-  // requests are dropped before reaching it.
-  assert.deepEqual(observed.slice(requestsBeforeRejections),[{method:'GET',path:'/api/v1/unknown'}]);
+  // Unknown or ambiguous requests are rejected at the gateway and must
+  // never contact the backend, including through the function's direct URL.
+  assert.equal(observed.length, requestsBeforeRejections);
   assert.equal(child.exitCode,null,'Gateway remains alive after anonymous rejection');
   await assert.rejects(access(join(directory,'dist')),{code:'ENOENT'});
  } finally {
