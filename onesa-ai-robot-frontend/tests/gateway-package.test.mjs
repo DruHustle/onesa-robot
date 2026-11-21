@@ -55,6 +55,37 @@ test('API function package serves readiness and anonymous auth without static ou
    assert.deepEqual(await response.json(),expectedBody,path);
   }
   assert.deepEqual(observed,paths.map(path=>({method:'GET',path})));
+  // Vercel's named path wildcard is delivered at the function target as an
+  // exact query binding. The original source failed all of these with 404 by
+  // passing /api/gateway to the allowlisted backend handler unchanged.
+  const rewritten = [
+   ['/api/gateway?__onesa_route=health','/api/v1/health'],
+   ['/api/gateway?__onesa_route=ready','/api/v1/ready'],
+   ['/api/gateway?__onesa_route=auth%2Fme','/api/v1/auth/me'],
+   ['/api/v1/ready?__onesa_route=ready','/api/v1/ready'],
+  ];
+  for (const [incoming,forwarded] of rewritten) {
+   const response=await fetch('http://127.0.0.1:'+port+incoming,{signal:AbortSignal.timeout(3000)});
+   const [status,body]=responses.get(forwarded);
+   assert.equal(response.status,status,incoming);
+   assert.deepEqual(await response.json(),body,incoming);
+  }
+  assert.deepEqual(observed.slice(paths.length),rewritten.map(([,path])=>({method:'GET',path})));
+  // Duplicate, traversal and unrecognized paths must remain disallowed. No
+  // attempted correction may ever create an unapproved backend request.
+  const requestsBeforeRejections=observed.length;
+  for(const incoming of [
+    '/api/gateway?__onesa_route=health&__onesa_route=ready',
+    '/api/gateway?__onesa_route=..%2Fready',
+    '/api/gateway?__onesa_route=health&unapproved=1',
+    '/api/gateway?__onesa_route=unknown',
+  ]){
+    const response=await fetch('http://127.0.0.1:'+port+incoming,{signal:AbortSignal.timeout(3000)});
+    assert.equal(response.status,404,incoming);
+  }
+  // Unknown or ambiguous requests are rejected at the gateway and must
+  // never contact the backend, including through the function's direct URL.
+  assert.equal(observed.length, requestsBeforeRejections);
   assert.equal(child.exitCode,null,'Gateway remains alive after anonymous rejection');
   await assert.rejects(access(join(directory,'dist')),{code:'ENOENT'});
  } finally {

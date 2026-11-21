@@ -51,7 +51,13 @@ remains separate. Do not use a real operator password or live hardware for tests
 
 `docker build -t onesa-robot-interface:local .` builds a separate non-root Node image.
 The Vercel adapter reuses the same proxy boundary, but an actual Vercel build and
-protected staged deployment still need qualification. The Git allowlist defaults to
+protected staged deployment still need qualification. The adapter reconstructs
+`/api/v1/*` from Vercel's single bounded `__onesa_route` wildcard when the
+serverless function is invoked at `/api/gateway`; both direct and rewritten
+forms must pass the same strict API allowlist. Duplicate, traversal, unknown
+or unapproved query values must not reach the backend. The staged source
+already implements this adapter; the public production release must carry
+its own exact-source and actual ready/health acceptance evidence. The Git allowlist defaults to
 false and permits only staging's protected native Preview. Production uses the
 separately authorized prebuilt release; no public release is implied by a branch push.
 API function initialization does not depend on the generated static output. The
