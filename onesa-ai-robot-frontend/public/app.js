@@ -14,6 +14,7 @@ window.addEventListener('onesa:stop-verified',()=>{
 });
 let fastPoll=false,lastIdlePoll=0;
 const localSimulator = ['127.0.0.1','localhost','[::1]'].includes(window.location?.hostname);
+const returnedFromRegistration = new URLSearchParams(window.location?.search).get('registration') === 'complete';
 let identityEnabled=false,identitySession=false,identityEndpoint='',identityConfirmationExpires=0,canOperate=true;
 let csrf = '', proposalId = '', timer, polling = null, generation=0, observationRevision=0, suspended=false, observationReady=false, simulatorStopped=true;
 const busyForms=new WeakSet();
@@ -89,7 +90,7 @@ async function configureIdentity(){
    const link=byId('onesa-account-link');if(link){link.href=account.href;link.hidden=false;}
    byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
    if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
-   if(!csrf && new URLSearchParams(window.location?.search).get('registration')==='complete'){
+   if(returnedFromRegistration){
      const entry=new URL(window.location.href);
      entry.searchParams.delete('registration');
      window.history.replaceState(null,'',entry.pathname+entry.search+entry.hash);
@@ -308,7 +309,30 @@ byId('stop').addEventListener('click',()=>{window.dispatchEvent(new Event('onesa
 byId('logout').addEventListener('click',()=>run(async()=>{const result=await client.logout();signedOut();if(result.identity_signed_out===false)throw new Error('Signed out of Robot. Open your Onesa account to finish signing out of other applications.');},identitySession?'Signed out of Onesa. Other applications will require sign-in.':'Signed out; this session cannot authorize further tasks.'));
 // No localStorage/sessionStorage, token URLs or persistence of operator credentials.
 
-function restoreSession({initial=false}={}){const current=++generation;return client.me().then(session=>{if(current!==generation)return;csrf=session.csrf;client.csrf=csrf;setIdentitySession(session);setAdministrator(session);byId('login-form').hidden=true;byId('operator').hidden=false;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=true;sessionPresentation(true);inspector.authenticate();timer=setInterval(()=>refresh(false),500);return refresh();}).catch(error=>{if(current!==generation)return;if(error.status===401)signedOut({preserveInitialSignIn:initial});else if(error.name!=='AbortError')notice(error.message);});}
+function restoreSession({initial=false}={}){
+ // A registration return must establish the central account before showing a
+ // private workspace. The cookie may still identify a different operator.
+ if(returnedFromRegistration)return Promise.resolve();
+ const current=++generation;
+ return client.me().then(session=>{
+  if(current!==generation)return;
+  csrf=session.csrf;
+  client.csrf=csrf;
+  setIdentitySession(session);
+  setAdministrator(session);
+  byId('login-form').hidden=true;
+  byId('operator').hidden=false;
+  if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=true;
+  sessionPresentation(true);
+  inspector.authenticate();
+  timer=setInterval(()=>refresh(false),500);
+  return refresh();
+ }).catch(error=>{
+  if(current!==generation)return;
+  if(error.status===401)signedOut({preserveInitialSignIn:initial});
+  else if(error.name!=='AbortError')notice(error.message);
+ });
+}
 function suspendRequests(){clearPhysicalPermission();inspector.stale();setObservationReady(false);suspended=true;generation++;clearInterval(timer);client.cancelPending();polling=null;}
 window.addEventListener('beforeunload',suspendRequests);
 window.addEventListener('pagehide',suspendRequests);
