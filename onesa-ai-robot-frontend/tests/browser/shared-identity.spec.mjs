@@ -119,6 +119,7 @@ test('viewer keeps a read-only workspace with Stop and sign-out available',async
   await expect(page.locator('#reset-submit')).toBeDisabled();
   await expect(page.locator('#proposal-submit')).toBeDisabled();
   await expect(page.locator('#administrator')).toBeHidden();
+  await expect(page.getByRole('link',{name:'Manage Onesa administrators'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Stop simulation',exact:true})).toBeEnabled();
   await expect(page.getByRole('button',{name:'Sign out of Onesa',exact:true})).toBeEnabled();
  }finally{await fixture.server.close();}
@@ -130,6 +131,7 @@ test('global administrator is visible but hardware remains unconnected',async({p
   await page.goto(fixture.server.origin+'/console');
   await expect(page.locator('#onesa-session-role')).toContainText('Onesa administrator · all applications');
   await expect(page.locator('#administrator')).toBeVisible();
+  await expect(page.getByRole('link',{name:'Manage Onesa administrators'})).toHaveAttribute('href','https://account.example.test/admin?product=robot');
   await expect(page.locator('#physical-controller-state')).toContainText('Not connected');
   await expect(page.locator('#physical-permission-password')).toBeHidden();
   await expect(page.locator('#physical-permission-password-confirmed')).toBeVisible();

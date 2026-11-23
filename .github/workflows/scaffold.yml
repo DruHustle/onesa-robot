@@ -148,7 +148,10 @@ jobs:
         python3 -m unittest discover -s scripts/ci -p test_browser_dependencies.py
         sudo -n --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,RUNNER_OS,GITHUB_REPOSITORY python3 scripts/ci/browser_dependencies.py
     - name: Install application browsers and system dependencies
-      timeout-minutes: 10
+      # GitHub's signed Ubuntu mirrors can be throttled under load; the prior
+      # 10-minute cap cancelled an otherwise healthy frontend acceptance job.
+      # Retain all three real browsers and the full system dependency install.
+      timeout-minutes: 20
       run: npx playwright install --with-deps chromium firefox webkit
       working-directory: onesa-ai-robot-frontend
     - name: Synthetic cross-browser operator acceptance
@@ -175,7 +178,7 @@ jobs:
         path: ${{ runner.temp }}/robot-browser-diagnostics.json
         retention-days: 1
         if-no-files-found: error
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       REVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       REVIEWDOG_GITHUB_API_TOKEN: ${{ github.token }}
