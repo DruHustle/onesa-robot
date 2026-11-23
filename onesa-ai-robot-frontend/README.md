@@ -26,6 +26,13 @@ UI reports local sign-out and directs the user to finish central sign-out; it do
 not claim a global success. Legacy mode retains the existing sign-in and password
 confirmation forms. See the [identity contract](../docs/engineering/IDENTITY.md).
 
+Managed Onesa browser sign-out uses the product's existing Auth0 application.
+Register the exact Robot HTTPS root (with the trailing slash) as an Allowed
+Logout URL before setting `ONESA_IDENTITY_BROWSER_LOGOUT_ENABLED=true`.
+The browser reaches Auth0 only after Robot has revoked the local session. The
+managed sign-out journey must be verified against this application in staging
+before enabling the setting in production.
+
 ```sh
 npm ci --ignore-scripts
 npm run build
