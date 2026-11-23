@@ -216,14 +216,18 @@ def test_console_callback_retains_the_legacy_owner_during_outage(
         if browser_logout and browser_request:
             target = urlsplit(body.pop("browser_logout_url"))
             assert (target.scheme, target.netloc, target.path) == (
-                "https", "auth.onesa.eu", "/oidc/logout"
+                "https",
+                "auth.onesa.eu",
+                "/oidc/logout",
             )
             assert parse_qs(target.query) == {
                 "client_id": [provider.client_id],
                 "post_logout_redirect_uri": [origin + "/"],
             }
         assert body == {
-            "status": "signed_out", "physical_actuation": False, "identity_signed_out": False
+            "status": "signed_out",
+            "physical_actuation": False,
+            "identity_signed_out": False,
         }
         assert client.cookies.get("robot_session") is None
         client.cookies.set("robot_session", stale)
