@@ -25,7 +25,7 @@ def signed():
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(key.public_key()))
     config = IdentityConfig(
-        "https://issuer.example/",
+        "https://auth.onesa.eu/",
         "robot-web",
         "test" * 10,
         "https://ai.example/callback",
@@ -118,9 +118,12 @@ def test_resource_token_audience_must_be_one_exact_string(signed, additional):
         validate(config, json.dumps(pair({"aud": [config.audience, *additional]})))
 
 
-@pytest.mark.parametrize("mobile", [False, True])
+@pytest.mark.parametrize(
+    ("mobile", "browser_logout", "browser_request"),
+    [(False, False, True), (True, False, False), (False, True, True), (False, True, False)],
+)
 def test_console_callback_retains_the_legacy_owner_during_outage(
-    tmp_path, monkeypatch, signed, mobile
+    tmp_path, monkeypatch, signed, mobile, browser_logout, browser_request
 ):
     import hashlib
 
@@ -131,14 +134,17 @@ def test_console_callback_retains_the_legacy_owner_during_outage(
     from robot_api.security import password_hash
 
     provider, stable, issue = signed
+    origin = "https://robot.example" if browser_logout else "http://localhost:3431"
     cfg = Settings(
         operator_password_hash=password_hash("synthetic-password-for-simulator"),
         database_path=tmp_path / "pilot.sqlite3",
+        public_origin=origin,
         identity_enabled=True,
+        identity_browser_logout_enabled=browser_logout,
         identity_issuer=provider.issuer,
         identity_audience=provider.audience,
         identity_client_id=provider.client_id,
-        identity_callback_url="http://localhost:3431/api/v1/auth/identity/callback",
+        identity_callback_url=origin + "/api/v1/auth/identity/callback",
         identity_client_secret=provider.client_secret,
         identity_public_jwks=provider.public_jwks,
         identity_mapping_issuer=provider.mapping_issuer,
@@ -193,3 +199,36 @@ def test_console_callback_retains_the_legacy_owner_during_outage(
         monkeypatch.setattr(managed_oidc, "_request", offline)
         assert client.get("/api/v1/auth/me").status_code == 200
         assert client.get("/api/v1/tasks").status_code == 200
+
+        stale = client.cookies.get("robot_session")
+        path = "/api/v1/auth/logout"
+        assert client.post(path, json={"browser": browser_request}).status_code == 403
+        assert client.get("/api/v1/auth/me").status_code == 200
+        csrf = {"X-CSRF-Token": me.json()["csrf"]}
+        result = (
+            client.post(path, json={"browser": True}, headers=csrf)
+            if browser_request
+            else client.post(path, headers=csrf)
+        )
+        assert result.status_code == 200
+        assert result.headers["cache-control"] == "no-store"
+        body = result.json()
+        if browser_logout and browser_request:
+            target = urlsplit(body.pop("browser_logout_url"))
+            assert (target.scheme, target.netloc, target.path) == (
+                "https",
+                "auth.onesa.eu",
+                "/oidc/logout",
+            )
+            assert parse_qs(target.query) == {
+                "client_id": [provider.client_id],
+                "post_logout_redirect_uri": [origin + "/"],
+            }
+        assert body == {
+            "status": "signed_out",
+            "physical_actuation": False,
+            "identity_signed_out": False,
+        }
+        assert client.cookies.get("robot_session") is None
+        client.cookies.set("robot_session", stale)
+        assert client.get("/api/v1/auth/me").status_code == 401

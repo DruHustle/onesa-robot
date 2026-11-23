@@ -665,6 +665,21 @@ export interface components {
             /** Source Sha256 */
             source_sha256?: string | null;
         };
+        /** BrowserLogout */
+        BrowserLogout: {
+            /** Browser Logout Url */
+            browser_logout_url: string;
+            /** Identity Signed Out */
+            identity_signed_out?: boolean | null;
+            /**
+             * Physical Actuation
+             * @default false
+             * @constant
+             */
+            physical_actuation: false;
+            /** Status */
+            status: string;
+        };
         /** Capabilities */
         Capabilities: {
             /**
@@ -871,6 +886,14 @@ export interface components {
             name: string;
             /** Password */
             password: string;
+        };
+        /** LogoutRequest */
+        LogoutRequest: {
+            /**
+             * Browser
+             * @default false
+             */
+            browser: boolean;
         };
         /** LogoutResponse */
         LogoutResponse: {
@@ -2598,7 +2621,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LogoutRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2606,7 +2633,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LogoutResponse"];
+                    "application/json": components["schemas"]["BrowserLogout"] | components["schemas"]["LogoutResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

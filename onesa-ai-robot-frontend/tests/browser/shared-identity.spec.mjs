@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {loopbackFrontend} from './loopback-frontend.mjs';
 
-async function identityFixture(page,{role='operator',signedIn=false,fresh=true,globalSignout=true,inspection=false}={}){
+async function identityFixture(page,{role='operator',signedIn=false,fresh=true,globalSignout=true,inspection=false,logoutUrl}={}){
  const server=await loopbackFrontend('http://localhost:3431',()=>false);
  const writes=[];let stopped=true;
  const profile={id:'synthetic-profile',name:'Synthetic test profile',version:'1.0.0',capabilities:[]};
@@ -21,7 +21,7 @@ async function identityFixture(page,{role='operator',signedIn=false,fresh=true,g
   else if(path==='/api/v1/reset'){stopped=false;body={status:'ready',physical_actuation:false};}
   else if(path==='/api/v1/stop'){stopped=true;body={status:'stopped',physical_actuation:false};}
   else if(path==='/api/v1/auth/identity/start')body={authorization_url:'https://account.example.test/api/v1/identity/auth?state=synthetic-state'};
-  else if(path==='/api/v1/auth/logout'){signedIn=false;body={status:'signed_out',physical_actuation:false,identity_signed_out:globalSignout};}
+  else if(path==='/api/v1/auth/logout'){signedIn=false;body={status:'signed_out',physical_actuation:false,identity_signed_out:globalSignout,...(logoutUrl?{browser_logout_url:logoutUrl(server.origin)}:{})};}
   else if(path==='/api/v1/admin/physical-operation')body={permission:'blocked',revision:0,expires_at:null,controller_connection:'not_connected',controller_readiness:'not_ready',physical_operation:'inactive',physical_actuation:false,sampled_at:Date.now()/1000};
   else if(inspection&&path==='/api/v1/missions/catalog')body={version:'1.0.0',mode:'simulation',physical_actuation:false,assets:[asset],robots:[profile],skills:[],scenarios:[{id:'normal',label:'Synthetic normal scenario'}],asset_context_import:'disabled'};
   else if(inspection&&path==='/api/v1/missions')body=request.method()==='POST'?mission:{missions:[]};
@@ -144,6 +144,28 @@ test('an unavailable global logout reports local sign-out honestly',async({page}
   await expect(page.locator('#operator')).toBeHidden();
   await expect(page.locator('#notice')).toContainText('Signed out of Robot. Open your Onesa account');
   await expect(page.getByRole('button',{name:'Continue with Onesa',exact:true})).toBeVisible();
+ }finally{await fixture.server.close();}
+});
+
+for(const host of ['auth.onesa.eu','external.example.test'])test(`browser sign-out checks the managed provider host (${host})`,async({page})=>{
+ const fixture=await identityFixture(page,{signedIn:true,globalSignout:false,logoutUrl:origin=>
+  `https://${host}/oidc/logout?`+new URLSearchParams({client_id:'synthetic-robot',post_logout_redirect_uri:origin+'/'})});
+ let navigated=false;
+ try{
+  await page.route(`https://${host}/oidc/logout?*`,route=>{
+   navigated=true;
+   return route.fulfill({contentType:'text/html',body:'<!doctype html><h1>Managed sign-out fixture</h1>'});
+  });
+  await page.goto(fixture.server.origin+'/console');
+  await page.getByRole('button',{name:'Sign out of Onesa',exact:true}).click();
+  if(host==='auth.onesa.eu'){
+   await expect(page.getByRole('heading',{name:'Managed sign-out fixture'})).toBeVisible();
+   expect(navigated).toBe(true);
+  }else{
+   await expect(page.locator('#notice')).toContainText('Signed out of Robot. Open your Onesa account');
+   expect(navigated).toBe(false);
+  }
+  expect(fixture.writes.find(({path})=>path==='/api/v1/auth/logout')?.body).toEqual({browser:true});
  }finally{await fixture.server.close();}
 });
 

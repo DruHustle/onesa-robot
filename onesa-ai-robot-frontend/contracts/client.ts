@@ -55,7 +55,10 @@ export class RobotClient {
  identityConfig(){return this.request<components['schemas']['IdentityConfigurationResponse']>(routes.identityConfig);}
  beginIdentity(step_up=false){return this.request<components['schemas']['IdentityStartResponse']>(routes.identityStart,{step_up});}
  login(value:Login){return this.request<components['schemas']['SessionResponse']>(routes.login,value);}
- logout(){return this.request<components['schemas']['LogoutResponse']>(routes.logout,{});}
+ logout({browser=false}={}){
+  return this.request<paths['/api/v1/auth/logout']['post']['responses'][200]['content']['application/json']>(
+   routes.logout,browser?{browser:true}:{});
+ }
  status(){return this.request<SimulationStatus>(routes.status);}
  tasks(){return this.request<TaskList>(routes.tasks);}
  propose(value:Proposal){return this.request<components['schemas']['TaskResponse']>(routes.tasks,value);}
