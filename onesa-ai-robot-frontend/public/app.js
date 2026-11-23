@@ -14,7 +14,8 @@ window.addEventListener('onesa:stop-verified',()=>{
 });
 let fastPoll=false,lastIdlePoll=0;
 const localSimulator = ['127.0.0.1','localhost','[::1]'].includes(window.location?.hostname);
-const returnedFromRegistration = new URLSearchParams(window.location?.search).get('registration') === 'complete';
+const returnedFromRegistration = Boolean(window.location?.search)
+ && new URLSearchParams(window.location.search).get('registration') === 'complete';
 let identityEnabled=false,identitySession=false,identityEndpoint='',identityConfirmationExpires=0,canOperate=true;
 let csrf = '', proposalId = '', timer, polling = null, generation=0, observationRevision=0, suspended=false, observationReady=false, simulatorStopped=true;
 const busyForms=new WeakSet();
