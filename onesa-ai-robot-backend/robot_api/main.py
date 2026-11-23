@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     administrator_name: str = Field(default="", max_length=64)
     context_import_enabled: bool = False
     identity_enabled: bool = Field(default=False, validation_alias="ONESA_IDENTITY_ENABLED")
+    identity_browser_logout_enabled: bool = Field(
+        default=False, validation_alias="ONESA_IDENTITY_BROWSER_LOGOUT_ENABLED"
+    )
     identity_issuer: str = Field(default="", validation_alias="ONESA_IDENTITY_ISSUER")
     identity_client_id: str = Field(default="", validation_alias="ONESA_IDENTITY_CLIENT_ID")
     identity_client_secret: SecretStr = Field(
@@ -132,6 +135,13 @@ class Settings(BaseSettings):
         if url.scheme == "http" and url.hostname not in ("localhost", "127.0.0.1"):
             raise ValueError("Remote operator access requires HTTPS")
         self.public_origin = self.public_origin.rstrip("/")
+        if self.identity_browser_logout_enabled and (
+            not self.identity_enabled
+            or not self.identity_audience
+            or self.identity_issuer != "https://auth.onesa.eu/"
+            or url.scheme != "https"
+        ):
+            raise ValueError("Browser sign-out requires managed Onesa identity and an HTTPS app")
         if self.identity_enabled:
             if self.identity_callback_url != (
                 self.public_origin + "/api/v1/auth/identity/callback"
@@ -340,6 +350,14 @@ ACTUATOR_UNAVAILABLE: dict[int | str, dict[str, Any]] = {
 
 class LogoutResponse(ActionResponse):
     identity_signed_out: bool | None = None
+
+
+class BrowserLogout(LogoutResponse):
+    browser_logout_url: str
+
+
+class LogoutRequest(BaseModel):
+    browser: bool = False
 
 
 class State:
@@ -1688,10 +1706,35 @@ def create_app(
             "global_administrator": operator.get("global_administrator", False),
         }
 
-    @app.post("/api/v1/auth/logout", response_model=LogoutResponse)
-    async def logout(request: Request, response: Response, operator: Operator):
+    @app.post("/api/v1/auth/logout", response_model=BrowserLogout | LogoutResponse)
+    async def logout(
+        request: Request,
+        response: Response,
+        operator: Operator,
+        value: LogoutRequest | None = None,
+    ):
         sim = state(request)
         linked = remove_session(sim, operator["token"])
+        response.delete_cookie("robot_session", path="/api/v1")
+        if (
+            linked
+            and identity_config
+            and linked.principal.issuer == identity_config.issuer
+            and config.identity_browser_logout_enabled
+            and value
+            and value.browser
+        ):
+            query = urlencode(
+                {
+                    "client_id": identity_config.client_id,
+                    "post_logout_redirect_uri": config.public_origin + "/",
+                }
+            )
+            return BrowserLogout(
+                status="signed_out",
+                identity_signed_out=False,
+                browser_logout_url=identity_config.issuer + "oidc/logout?" + query,
+            )
         identity_signed_out = None
         if linked and identity_config:
             identity_signed_out = False
@@ -1704,7 +1747,6 @@ def create_app(
                 )
             except identity.IdentityError:
                 pass
-        response.delete_cookie("robot_session", path="/api/v1")
         return {"status": "signed_out", "identity_signed_out": identity_signed_out}
 
     @app.get("/api/v1/status", response_model=StatusResponse)
