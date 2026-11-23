@@ -50,7 +50,7 @@ for(const width of [390,768,1280])test(`one-account sign-in is accessible at ${w
  }finally{await fixture.server.close();}
 });
 
-test('registration return confirms Onesa before restoring a previous operator',async({page})=>{
+test('registration return retries Onesa before restoring a previous operator',async({page})=>{
  const fixture=await identityFixture(page,{signedIn:true});
  const priorReads=[];
  page.on('request',request=>{
@@ -58,7 +58,13 @@ test('registration return confirms Onesa before restoring a previous operator',a
   if(path==='/api/v1/auth/me'||path==='/api/v1/status')priorReads.push(path);
  });
  try{
+  await page.route('**/api/v1/auth/identity/start', route =>
+   route.fulfill({status:503,json:{detail:'Synthetic sign-in outage'}}),
+  {times:1});
   await page.goto(fixture.server.origin+'/console?registration=complete');
+  await expect(page.locator('#notice')).toContainText('Synthetic sign-in outage');
+  await expect(page).toHaveURL(fixture.server.origin+'/console?registration=complete');
+  await page.reload();
   await expect(page.getByRole('heading',{name:'Onesa account sign-in'})).toBeVisible();
   expect(priorReads).toEqual([]);
   expect(fixture.writes).toEqual([{path:'/api/v1/auth/identity/start',body:{step_up:false}}]);
