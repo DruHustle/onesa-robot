@@ -312,6 +312,41 @@
         "title": "Asset",
         "type": "object"
       },
+      "BrowserLogout": {
+        "properties": {
+          "browser_logout_url": {
+            "title": "Browser Logout Url",
+            "type": "string"
+          },
+          "identity_signed_out": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Signed Out"
+          },
+          "physical_actuation": {
+            "const": false,
+            "default": false,
+            "title": "Physical Actuation",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "browser_logout_url"
+        ],
+        "title": "BrowserLogout",
+        "type": "object"
+      },
       "Capabilities": {
         "properties": {
           "camera": {
@@ -774,6 +809,17 @@
           "password"
         ],
         "title": "Login",
+        "type": "object"
+      },
+      "LogoutRequest": {
+        "properties": {
+          "browser": {
+            "default": false,
+            "title": "Browser",
+            "type": "boolean"
+          }
+        },
+        "title": "LogoutRequest",
         "type": "object"
       },
       "LogoutResponse": {
@@ -3481,16 +3527,51 @@
     "/api/v1/auth/logout": {
       "post": {
         "operationId": "logout_api_v1_auth_logout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LogoutRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Value"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LogoutResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BrowserLogout"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LogoutResponse"
+                    }
+                  ],
+                  "title": "Response Logout Api V1 Auth Logout Post"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Logout"
