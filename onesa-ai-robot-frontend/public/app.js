@@ -75,7 +75,8 @@ async function startIdentity(stepUp=false){
  try{
   const result=await client.beginIdentity(stepUp),target=new URL(result.authorization_url);
   if(target.origin+target.pathname!==identityEndpoint||target.username||target.password||target.hash)throw new Error('Onesa sign-in could not be verified.');
-  window.location.assign(target.href);
+  if(!stepUp&&returnedFromRegistration)window.location.replace(target.href);
+  else window.location.assign(target.href);
  }catch(error){notice(error.message);if(button)button.disabled=false;}
 }
 async function configureIdentity(){
@@ -99,12 +100,7 @@ async function configureIdentity(){
    }
    byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
    if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
-   if(returnedFromRegistration){
-     const entry=new URL(window.location.href);
-     entry.searchParams.delete('registration');
-     window.history.replaceState(null,'',entry.pathname+entry.search+entry.hash);
-     await startIdentity();
-   }
+   if(returnedFromRegistration)await startIdentity();
   }
   if(window.location?.search){
    const outcome=new URLSearchParams(window.location.search).get('identity');
