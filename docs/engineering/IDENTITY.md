@@ -19,7 +19,7 @@ It never silently creates a separate password account or grants a requested role
 | No Robot entitlement | Sign-in is refused; request access in the account hub. |
 | Robot viewer | Read the account's workspace/history. No proposals, reset or approvals. Stop remains available. |
 | Robot operator | Use the supervised simulator and own records after recent MFA and explicit review. |
-| Robot admin | MFA is required for entry; existing software permission administration also requires fresh MFA. |
+| Robot administrator (legacy `admin` accepted during migration) | MFA is required for entry; existing software permission administration also requires fresh MFA. |
 | Global administrator | Robot administration and centrally managed access across products; central MFA is required. |
 
 Global administration does not automatically disclose another account's private task

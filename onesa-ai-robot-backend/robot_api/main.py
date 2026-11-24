@@ -1164,7 +1164,9 @@ def create_app(
     def identity_role(
         principal: identity.Identity,
     ) -> Literal["viewer", "operator", "administrator"]:
-        if principal.global_admin or principal.product_roles.get("robot") == "admin":
+        if principal.global_admin or (
+            principal.product_roles.get("robot") in {"admin", "administrator"}
+        ):
             return "administrator"
         return "operator" if principal.product_roles.get("robot") == "operator" else "viewer"
 
