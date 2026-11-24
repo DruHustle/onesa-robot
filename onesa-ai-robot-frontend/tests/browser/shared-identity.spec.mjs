@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {loopbackFrontend} from './loopback-frontend.mjs';
 
-async function identityFixture(page,{role='operator',signedIn=false,fresh=true,globalSignout=true,inspection=false}={}){
+async function identityFixture(page,{role='operator',signedIn=false,fresh=true,globalSignout=true,inspection=false,logoutUrl}={}){
  const server=await loopbackFrontend('http://localhost:3431',()=>false);
  const writes=[];let stopped=true;
  const profile={id:'synthetic-profile',name:'Synthetic test profile',version:'1.0.0',capabilities:[]};
@@ -21,7 +21,7 @@ async function identityFixture(page,{role='operator',signedIn=false,fresh=true,g
   else if(path==='/api/v1/reset'){stopped=false;body={status:'ready',physical_actuation:false};}
   else if(path==='/api/v1/stop'){stopped=true;body={status:'stopped',physical_actuation:false};}
   else if(path==='/api/v1/auth/identity/start')body={authorization_url:'https://account.example.test/api/v1/identity/auth?state=synthetic-state'};
-  else if(path==='/api/v1/auth/logout'){signedIn=false;body={status:'signed_out',physical_actuation:false,identity_signed_out:globalSignout};}
+  else if(path==='/api/v1/auth/logout'){signedIn=false;body={status:'signed_out',physical_actuation:false,identity_signed_out:globalSignout,...(logoutUrl?{browser_logout_url:logoutUrl(server.origin)}:{})};}
   else if(path==='/api/v1/admin/physical-operation')body={permission:'blocked',revision:0,expires_at:null,controller_connection:'not_connected',controller_readiness:'not_ready',physical_operation:'inactive',physical_actuation:false,sampled_at:Date.now()/1000};
   else if(inspection&&path==='/api/v1/missions/catalog')body={version:'1.0.0',mode:'simulation',physical_actuation:false,assets:[asset],robots:[profile],skills:[],scenarios:[{id:'normal',label:'Synthetic normal scenario'}],asset_context_import:'disabled'};
   else if(inspection&&path==='/api/v1/missions')body=request.method()==='POST'?mission:{missions:[]};
@@ -46,6 +46,27 @@ for(const width of [390,768,1280])test(`one-account sign-in is accessible at ${w
   await expect(page.getByRole('button',{name:'Continue with Onesa',exact:true})).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading',{name:'Onesa account sign-in'})).toBeVisible();
+  expect(fixture.writes).toEqual([{path:'/api/v1/auth/identity/start',body:{step_up:false}}]);
+ }finally{await fixture.server.close();}
+});
+
+test('registration return retries Onesa before restoring a previous operator',async({page})=>{
+ const fixture=await identityFixture(page,{signedIn:true});
+ const priorReads=[];
+ page.on('request',request=>{
+  const path=new URL(request.url()).pathname;
+  if(path==='/api/v1/auth/me'||path==='/api/v1/status')priorReads.push(path);
+ });
+ try{
+  await page.route('**/api/v1/auth/identity/start', route =>
+   route.fulfill({status:503,json:{detail:'Synthetic sign-in outage'}}),
+  {times:1});
+  await page.goto(fixture.server.origin+'/console?registration=complete');
+  await expect(page.locator('#notice')).toContainText('Synthetic sign-in outage');
+  await expect(page).toHaveURL(fixture.server.origin+'/console?registration=complete');
+  await page.reload();
+  await expect(page.getByRole('heading',{name:'Onesa account sign-in'})).toBeVisible();
+  expect(priorReads).toEqual([]);
   expect(fixture.writes).toEqual([{path:'/api/v1/auth/identity/start',body:{step_up:false}}]);
  }finally{await fixture.server.close();}
 });
@@ -104,6 +125,7 @@ test('viewer keeps a read-only workspace with Stop and sign-out available',async
   await expect(page.locator('#reset-submit')).toBeDisabled();
   await expect(page.locator('#proposal-submit')).toBeDisabled();
   await expect(page.locator('#administrator')).toBeHidden();
+  await expect(page.getByRole('link',{name:'Manage Onesa administrators'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Stop simulation',exact:true})).toBeEnabled();
   await expect(page.getByRole('button',{name:'Sign out of Onesa',exact:true})).toBeEnabled();
  }finally{await fixture.server.close();}
@@ -115,6 +137,7 @@ test('global administrator is visible but hardware remains unconnected',async({p
   await page.goto(fixture.server.origin+'/console');
   await expect(page.locator('#onesa-session-role')).toContainText('Onesa administrator · all applications');
   await expect(page.locator('#administrator')).toBeVisible();
+  await expect(page.getByRole('link',{name:'Manage Onesa administrators'})).toHaveAttribute('href','https://account.example.test/admin?product=robot');
   await expect(page.locator('#physical-controller-state')).toContainText('Not connected');
   await expect(page.locator('#physical-permission-password')).toBeHidden();
   await expect(page.locator('#physical-permission-password-confirmed')).toBeVisible();
@@ -132,6 +155,28 @@ test('an unavailable global logout reports local sign-out honestly',async({page}
  }finally{await fixture.server.close();}
 });
 
+for(const host of ['auth.onesa.eu','external.example.test'])test(`browser sign-out checks the managed provider host (${host})`,async({page})=>{
+ const fixture=await identityFixture(page,{signedIn:true,globalSignout:false,logoutUrl:origin=>
+  `https://${host}/oidc/logout?`+new URLSearchParams({client_id:'synthetic-robot',post_logout_redirect_uri:origin+'/'})});
+ let navigated=false;
+ try{
+  await page.route(`https://${host}/oidc/logout?*`,route=>{
+   navigated=true;
+   return route.fulfill({contentType:'text/html',body:'<!doctype html><h1>Managed sign-out fixture</h1>'});
+  });
+  await page.goto(fixture.server.origin+'/console');
+  await page.getByRole('button',{name:'Sign out of Onesa',exact:true}).click();
+  if(host==='auth.onesa.eu'){
+   await expect(page.getByRole('heading',{name:'Managed sign-out fixture'})).toBeVisible();
+   expect(navigated).toBe(true);
+  }else{
+   await expect(page.locator('#notice')).toContainText('Signed out of Robot. Open your Onesa account');
+   expect(navigated).toBe(false);
+  }
+  expect(fixture.writes.find(({path})=>path==='/api/v1/auth/logout')?.body).toEqual({browser:true});
+ }finally{await fixture.server.close();}
+});
+
 test('missing product access has a clear recovery route and removes callback state',async({page})=>{
  const fixture=await identityFixture(page);
  try{
@@ -141,3 +186,25 @@ test('missing product access has a clear recovery route and removes callback sta
   await expect(page).toHaveURL(fixture.server.origin+'/console');
  }finally{await fixture.server.close();}
 });
+
+for (const [tier, linkName] of [["user", "Create an Onesa account"], ["admin", "Request administrator access"]]) {
+  test(`${tier} registration returns to Robot and starts a new product sign-in`, async ({ page }) => {
+    const fixture = await identityFixture(page, { signedIn: false });
+    try {
+      const resume = fixture.server.origin + "/console?registration=complete";
+      await page.route("https://account.onesa.eu/register?*", route => {
+        expect(Object.fromEntries(new URL(route.request().url()).searchParams)).toEqual({ product: "robot", platform: "web", audience: tier });
+        return route.fulfill({ contentType: "text/html", body: `<!doctype html><script>location.replace(${JSON.stringify(resume)})</script>` });
+      });
+      await page.goto(fixture.server.origin + "/console");
+      await Promise.all([
+        page.waitForRequest(request => request.isNavigationRequest() && request.url() === resume),
+        page.getByRole("link", { name: linkName, exact: true }).click(),
+      ]);
+      await expect(page.getByRole("heading", { name: "Onesa account sign-in" })).toBeVisible();
+      expect(fixture.writes.filter(write => write.path === "/api/v1/auth/identity/start")).toHaveLength(1);
+    } finally {
+      await fixture.server.close();
+    }
+  });
+}

@@ -4,7 +4,7 @@
 > allowance after a future owner visibility change. No local executor is a fallback.
 > Historical runner/plan observations are retained as history, not current instructions.
 
-# CI/CD pipeline implementation and audit — onesa-ai-robot
+# CI/CD pipeline implementation and audit — Onesa Robot
 
 > Current branch/dependency policy: the owner's latest 14 October 2026 instruction
 > authorizes temporary security PR/candidate branches while retaining dev/staging/main

@@ -312,6 +312,41 @@
         "title": "Asset",
         "type": "object"
       },
+      "BrowserLogout": {
+        "properties": {
+          "browser_logout_url": {
+            "title": "Browser Logout Url",
+            "type": "string"
+          },
+          "identity_signed_out": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Signed Out"
+          },
+          "physical_actuation": {
+            "const": false,
+            "default": false,
+            "title": "Physical Actuation",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "browser_logout_url"
+        ],
+        "title": "BrowserLogout",
+        "type": "object"
+      },
       "Capabilities": {
         "properties": {
           "camera": {
@@ -616,6 +651,17 @@
             ],
             "title": "Account Url"
           },
+          "authorization_endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Endpoint"
+          },
           "enabled": {
             "title": "Enabled",
             "type": "boolean"
@@ -630,6 +676,11 @@
       "IdentityStart": {
         "additionalProperties": false,
         "properties": {
+          "mobile": {
+            "default": false,
+            "title": "Mobile",
+            "type": "boolean"
+          },
           "step_up": {
             "default": false,
             "title": "Step Up",
@@ -758,6 +809,17 @@
           "password"
         ],
         "title": "Login",
+        "type": "object"
+      },
+      "LogoutRequest": {
+        "properties": {
+          "browser": {
+            "default": false,
+            "title": "Browser",
+            "type": "boolean"
+          }
+        },
+        "title": "LogoutRequest",
         "type": "object"
       },
       "LogoutResponse": {
@@ -2637,6 +2699,19 @@
         "title": "RobotProfile",
         "type": "object"
       },
+      "ServiceError": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "title": "ServiceError",
+        "type": "object"
+      },
       "SessionResponse": {
         "properties": {
           "authentication_method": {
@@ -2668,6 +2743,12 @@
             "title": "Global Administrator",
             "type": "boolean"
           },
+          "id": {
+            "description": "Opaque stable Robot account identity; display name is not an ownership key.",
+            "pattern": "^robot_[0-9a-f]{64}$",
+            "title": "Id",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -2684,6 +2765,7 @@
           }
         },
         "required": [
+          "id",
           "csrf",
           "name"
         ],
@@ -3315,6 +3397,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Allow Physical Permission"
@@ -3435,16 +3527,51 @@
     "/api/v1/auth/logout": {
       "post": {
         "operationId": "logout_api_v1_auth_logout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/LogoutRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Value"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/LogoutResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/BrowserLogout"
+                    },
+                    {
+                      "$ref": "#/components/schemas/LogoutResponse"
+                    }
+                  ],
+                  "title": "Response Logout Api V1 Auth Logout Post"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "Logout"
@@ -3680,6 +3807,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid Propose"
@@ -3730,6 +3867,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid Approve"
@@ -3748,6 +3895,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Humanoid State"
@@ -4038,6 +4195,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "Simulation service unavailable, including an actuator feedback fault."
           }
         },
         "summary": "Reset"
@@ -4206,6 +4373,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceError"
+                }
+              }
+            },
+            "description": "The task has already completed."
           },
           "422": {
             "content": {

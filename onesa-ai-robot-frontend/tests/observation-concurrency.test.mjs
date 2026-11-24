@@ -21,7 +21,7 @@ async function fixture(observationDelayMs=0){
   tasks(){return request('tasks',tasks);}
   cancelPending(){calls.cancelPending++;this.pending.abort();this.pending=new AbortController();}
  }
- const context={RobotClient,createInspection:()=>({reset(){},authenticate(){},stale(){},refresh(value){observed.push(value);},hasPending(){return false;}}),document:{hidden:false,addEventListener(event,handler){documents.set(event,handler);},getElementById:node,querySelectorAll:()=>[],createElement:()=>({textContent:'',append(){}})},window:{addEventListener(event,handler){windows.set(event,handler);}},setInterval(){return 1;},clearInterval(){},setTimeout,AbortController,AbortSignal,Date,performance};
+ const context={RobotClient,createInspection:()=>({reset(){},authenticate(){},stale(){},refresh(value){observed.push(value);},hasPending(){return false;}}),document:{hidden:false,addEventListener(event,handler){documents.set(event,handler);},getElementById:node,querySelectorAll:()=>[],createElement:()=>({textContent:'',append(){}})},window:{location:{hostname:"localhost"},addEventListener(event,handler){windows.set(event,handler);}},setInterval(){return 1;},clearInterval(){},setTimeout,AbortController,AbortSignal,Date,performance};
  node('history');vm.createContext(context);vm.runInContext(source,context);await tick();
  vm.runInContext("csrf='synthetic-session';client.csrf=csrf;byId('operator').hidden=false;byId('login-form').hidden=true;",context);
  return {calls,pending,nodes,windows,documents,context,observed,action(action){context.controlledAction=action;return vm.runInContext("run(controlledAction,'Synthetic action completed.')",context);},restoreSession(session){restoredSession=session;},refresh:()=>vm.runInContext('refresh()',context)};

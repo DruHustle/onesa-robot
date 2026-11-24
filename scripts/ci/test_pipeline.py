@@ -54,6 +54,22 @@ class PipelineTests(unittest.TestCase):
             self.assertTrue(all(selection[key] for key in paths.FIELDS))
             self.assertEqual(selection["applications"], ["frontend", "backend"])
 
+    def test_native_clients_build_on_release_pushes_without_cancelling_release_runs(self):
+        workflow = (ROOT / ".github/workflows/mobile-clients.yml").read_text()
+        self.assertRegex(
+            workflow,
+            r"(?ms)^  push:\n    branches:\n      - dev\n      - staging\n      - main\n",
+        )
+        self.assertIn(
+            "group: mobile-clients-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}",
+            workflow,
+        )
+        self.assertIn(
+            "cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+            workflow,
+        )
+        self.assertIn("'onesa-ai-robot-frontend/mobile/**'", workflow)
+
     def test_unknown_and_shared_security_contract_paths_fail_safe(self):
         for product in ("onesa-company-portal", "onesa-ai-platform", "onesa-robot"):
             for name in (

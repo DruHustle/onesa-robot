@@ -39,10 +39,16 @@ test('a missing application module cannot submit a password in a navigation URL'
  await page.goto('/console');
  const form=page.locator('#login-form');
  expect(await form.evaluate(element=>element.method)).toBe('post');
- await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeDisabled();
- await page.getByLabel('Operator name',{exact:true}).fill('synthetic-owner');
- await page.getByLabel('Password',{exact:true}).fill('synthetic-no-navigation');
- await page.getByLabel('Password',{exact:true}).press('Enter');
+ await expect(form).toBeHidden();
+ await expect(form.locator('button[type="submit"]')).toBeDisabled();
+ await expect(page.getByRole('button',{name:'Sign in',exact:true})).toHaveCount(0);
+ // A browser can restore saved values before application JavaScript loads.
+ await form.locator('input[name="password"]').evaluate(input=>{input.value='synthetic-no-navigation';});
+ const portal=page.getByRole('link',{name:'Open Company Portal',exact:true});
+ await expect(portal).toHaveAttribute('href','https://portal.onesa.eu/account');
+ await page.route('https://portal.onesa.eu/account',route=>route.fulfill({contentType:'text/html',body:'Company Portal test destination'}));
+ await portal.click();
+ await expect(page).toHaveURL('https://portal.onesa.eu/account');
  expect(urls.some(url=>url.includes('synthetic-no-navigation')||url.includes('password='))).toBe(false);
  expect(new URL(page.url()).search).toBe('');
 });

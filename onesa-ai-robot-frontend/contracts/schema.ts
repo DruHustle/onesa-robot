@@ -665,6 +665,21 @@ export interface components {
             /** Source Sha256 */
             source_sha256?: string | null;
         };
+        /** BrowserLogout */
+        BrowserLogout: {
+            /** Browser Logout Url */
+            browser_logout_url: string;
+            /** Identity Signed Out */
+            identity_signed_out?: boolean | null;
+            /**
+             * Physical Actuation
+             * @default false
+             * @constant
+             */
+            physical_actuation: false;
+            /** Status */
+            status: string;
+        };
         /** Capabilities */
         Capabilities: {
             /**
@@ -802,11 +817,18 @@ export interface components {
         IdentityConfigurationResponse: {
             /** Account Url */
             account_url?: string | null;
+            /** Authorization Endpoint */
+            authorization_endpoint?: string | null;
             /** Enabled */
             enabled: boolean;
         };
         /** IdentityStart */
         IdentityStart: {
+            /**
+             * Mobile
+             * @default false
+             */
+            mobile: boolean;
             /**
              * Step Up
              * @default false
@@ -864,6 +886,14 @@ export interface components {
             name: string;
             /** Password */
             password: string;
+        };
+        /** LogoutRequest */
+        LogoutRequest: {
+            /**
+             * Browser
+             * @default false
+             */
+            browser: boolean;
         };
         /** LogoutResponse */
         LogoutResponse: {
@@ -2132,6 +2162,11 @@ export interface components {
              */
             version: "1.0.0";
         };
+        /** ServiceError */
+        ServiceError: {
+            /** Detail */
+            detail: string;
+        };
         /** SessionResponse */
         SessionResponse: {
             /**
@@ -2149,6 +2184,11 @@ export interface components {
              * @default false
              */
             global_administrator: boolean;
+            /**
+             * Id
+             * @description Opaque stable Robot account identity; display name is not an ownership key.
+             */
+            id: string;
             /** Name */
             name: string;
             /**
@@ -2457,6 +2497,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Simulation service unavailable, including an actuator feedback fault. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceError"];
+                };
+            };
         };
     };
     block_physical_permission_api_v1_admin_physical_operation_block_post: {
@@ -2572,7 +2621,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LogoutRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2580,7 +2633,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LogoutResponse"];
+                    "application/json": components["schemas"]["BrowserLogout"] | components["schemas"]["LogoutResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2820,6 +2882,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Simulation service unavailable, including an actuator feedback fault. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceError"];
+                };
+            };
         };
     };
     humanoid_approve_api_v1_humanoid_proposals__command_id__approve_post: {
@@ -2855,6 +2926,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Simulation service unavailable, including an actuator feedback fault. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceError"];
+                };
+            };
         };
     };
     humanoid_state_api_v1_humanoid_state_get: {
@@ -2873,6 +2953,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["robot_api__humanoid__Observation"];
+                };
+            };
+            /** @description Simulation service unavailable, including an actuator feedback fault. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceError"];
                 };
             };
         };
@@ -3131,6 +3220,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Simulation service unavailable, including an actuator feedback fault. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceError"];
+                };
+            };
         };
     };
     status_api_v1_status_get: {
@@ -3279,6 +3377,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActionResponse"];
+                };
+            };
+            /** @description The task has already completed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServiceError"];
                 };
             };
             /** @description Validation Error */

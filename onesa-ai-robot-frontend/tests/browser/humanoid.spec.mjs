@@ -7,15 +7,16 @@ const definition=Object.values(schema.components.schemas).find(value=>value.prop
 const model={model_id:'onesa-humanoid-33-v1',mode:'simulation',physical_actuation:false,joints:definition.properties.joints.default};
 const positions=()=>Object.fromEntries(model.joints.map(j=>[j.name,0]));
 
-async function fixture(page){
- let pending=null,active=null,stops=0,unavailable=false,authenticated=true,stopped=false;
- let heldPath=null,release=null,entered=0,heartbeats=0;
- const observation=()=>({model_id:model.model_id,mode:'simulation',connection:'simulated_actuators',physical_actuation:false,stopped,owns_active:Boolean(active),positions:positions(),pending,active_command:active,history:[]});
+async function fixture(page,{sharedIdentity=false}={}){
+ let pending=null,active=null,stops=0,unavailable=false,authenticated=true,stopped=false,leaveActiveOnStop=false;
+ let connection='simulated_actuators';
+ let heldPath=null,release=null,entered=0,heartbeats=0,lateHeartbeats=0;
+ const observation=()=>({model_id:model.model_id,mode:'simulation',connection,physical_actuation:false,stopped,owns_active:Boolean(active),positions:positions(),pending,active_command:active,history:[]});
  await page.route('**/api/v1/**',async route=>{
   const path=new URL(route.request().url()).pathname;let status=200,body={};
-  if(path.endsWith('/stop')){stops++;stopped=true;pending=active=null;body={status:'stopped'};}
+  if(path.endsWith('/stop')){stops++;stopped=true;if(!leaveActiveOnStop)pending=active=null;body={status:'stopped',physical_actuation:false};}
   else if(!authenticated){status=401;body={detail:'Sign in required'};}
-  else if(path.endsWith('/auth/me'))body={csrf:'synthetic-humanoid-session',name:'synthetic-owner',role:'operator'};
+  else if(path.endsWith('/auth/me'))body={csrf:'synthetic-humanoid-session',name:'synthetic-owner',role:'operator',authentication_method:sharedIdentity?'onesa':'operator',confirmation_expires_at:sharedIdentity?Date.now()/1000+240:null};
   else if(path.endsWith('/auth/logout')){authenticated=false;pending=active=null;}
   else if(path.endsWith('/reset')){stopped=false;body={status:'reset'};}
   else if(path.endsWith('/humanoid/model'))body=model;
@@ -28,8 +29,8 @@ async function fixture(page){
    expect(route.request().postDataJSON().expected_plan_sha256).toBe(pending.plan_sha256);
    active=pending.request.command_id;pending=null;body=observation();
   }else if(path.endsWith('/humanoid/heartbeat')){
-   expect(route.request().postDataJSON().command_id).toBe(active);heartbeats++;
-   body={status:'received'};
+   if(stopped||!active){lateHeartbeats++;status=409;body={detail:'Humanoid command is no longer running'};}
+   else{expect(route.request().postDataJSON().command_id).toBe(active);heartbeats++;body={status:'received'};}
   }else if(path.endsWith('/tasks'))body={tasks:[]};
   else if(path.endsWith('/status'))body={mode:'simulation',physical_actuation:false,stopped,position_radians:0,active_task:null,sampled_at:Date.now()/1000,capabilities:{edge_telemetry:'not_connected'},deployment_environment:'local'};
   else if(!path.endsWith('/heartbeat')){status=404;body={detail:'Unexpected fixture route'};}
@@ -40,14 +41,17 @@ async function fixture(page){
   await route.fulfill({status,contentType:'application/json',body:JSON.stringify(body)}).catch(()=>{});
  });
  await page.goto('/console');
- await expect(page.getByRole('button',{name:'Sign out',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:sharedIdentity?'Sign out of Onesa':'Sign out',exact:true})).toBeVisible();
  await page.locator('#humanoid > summary').click();
  await expect(page.locator('#humanoid-joints input')).toHaveCount(33);
  await expect(page.locator('#humanoid-propose')).toBeEnabled();
  return {
   get stops(){return stops;},get entered(){return entered;},get heartbeats(){return heartbeats;},
-  get pending(){return pending;},get active(){return active;},
+  get pending(){return pending;},get active(){return active;},get lateHeartbeats(){return lateHeartbeats;},
   fail(){unavailable=true;},loseSession(){authenticated=false;},
+  fault(){connection='simulator_fault';},
+  leaveActiveOnStop(){leaveActiveOnStop=true;},
+  replacePlan(){pending={...pending,plan_sha256:'b'.repeat(64),request:{...pending.request,duration_seconds:8}};},
   hold(path){heldPath=path;},release(){heldPath=null;release?.();},
   reset(){stopped=false;},
  };
@@ -93,11 +97,39 @@ test('whole-body review uses exact immutable targets and preserves input through
  await expect(page.locator('#humanoid-joints input')).toHaveCount(0);
 });
 
+test('Stop readback that still reports an active command keeps heartbeat paused',async({page})=>{
+ const state=await fixture(page);await propose(page);await approve(page);
+ state.leaveActiveOnStop();
+ await page.locator('#humanoid-stop').click();
+ await expect.poll(()=>state.stops).toBe(1);
+ // Valid supervision can run while Playwright waits to dispatch the click.
+ // The stop request is the boundary; rejected late heartbeats must also stay zero.
+ const heartbeatsAfterStop=state.heartbeats;
+ await expect(page.locator('#humanoid-state')).toContainText(/Stop could not be verified|Stop acknowledgement is unavailable/);
+ expect(state.active).not.toBeNull();
+ await page.waitForTimeout(650);
+ expect(state.heartbeats).toBe(heartbeatsAfterStop);
+ expect(state.lateHeartbeats).toBe(0);
+});
+
+test('the shared console Stop pauses humanoid supervision and verifies both views',async({page})=>{
+ const state=await fixture(page);await propose(page);await approve(page);
+ await page.locator('#stop').click();
+ await expect.poll(()=>state.stops).toBe(1);
+ const heartbeatsAfterStop=state.heartbeats;
+ await expect(page.locator('#next-step')).toContainText('Stopped');
+ await expect(page.locator('#humanoid-state')).toContainText('Stopped');
+ await page.waitForTimeout(650);
+ expect(state.heartbeats).toBe(heartbeatsAfterStop);
+ expect(state.lateHeartbeats).toBe(0);
+});
+
 test('telemetry failure pauses supervision and closing still stops unresolved motion',async({page})=>{
  const state=await fixture(page);
  await propose(page);await approve(page);
  state.fail();
  await expect(page.locator('#humanoid-state')).toContainText('Telemetry unavailable');
+ await expect(page.locator('#humanoid-links').locator('circle')).toHaveCount(0);
  await expect(page.locator('#humanoid-propose')).toBeDisabled();
  const heartbeats=state.heartbeats;
  await page.locator('#humanoid > summary').click();
@@ -152,4 +184,29 @@ test('page departure requests Stop while session loss clears the protected contr
  state.loseSession();
  await expect(page.locator('#humanoid-joints input')).toHaveCount(0);
  await expect(page.locator('#humanoid-password')).toHaveValue('');
+});
+
+test('shared-identity review must be repeated when the displayed humanoid plan changes',async({page})=>{
+ const state=await fixture(page,{sharedIdentity:true});
+ await propose(page);
+ const confirmed=page.getByLabel('I reviewed these exact joint targets and confirm approval.');
+ await confirmed.check();
+ state.replacePlan();
+ await expect(page.locator('#humanoid-plan')).toContainText('over 8 seconds');
+ await expect(confirmed).not.toBeChecked();
+ await page.locator('#humanoid-approve').click();
+ expect(state.active).toBeNull();
+});
+
+test('a reported actuator fault locks proposal review and keeps Stop available',async({page})=>{
+ const state=await fixture(page);
+ await propose(page);
+ state.fault();
+ await expect(page.locator('#humanoid-state')).toContainText('Simulated actuator fault');
+ await expect(page.locator('#humanoid-approve')).toBeDisabled();
+ await expect(page.locator('#humanoid-neutral')).toBeDisabled();
+ await page.locator('#humanoid-stop').click();
+ await expect.poll(()=>state.stops).toBe(1);
+ await expect(page.locator('#humanoid-state')).toContainText(/Stop could not be verified|Stop acknowledgement is unavailable/);
+ expect(state.pending).toBeNull();
 });
