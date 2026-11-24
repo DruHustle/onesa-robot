@@ -98,6 +98,7 @@ def test_provider_exchange_and_local_key_restart(signed):
         ({NS + "products": ["ai"]}, {}),
         ({NS + "user_id": "member@example.com"}, {}),
         ({NS + "roles": ["admin"]}, {}),
+        ({NS + "roles": ["administrator"]}, {}),
         ({"exp": int(time.time()) + 600}, {}),
         ({"exp": 10}, {}),
         ({}, {"sub": "other"}),
@@ -109,6 +110,15 @@ def test_mismatch_or_privilege_denied(signed, changes, profile):
     config, _, pair = signed
     with pytest.raises(IdentityError):
         validate(config, json.dumps(pair(changes, profile)))
+
+
+@pytest.mark.parametrize("role", ["admin", "administrator"])
+def test_managed_administrator_retains_verified_mfa(signed, role):
+    config, _, pair = signed
+    claims = {NS + "roles": [role], NS + "mfa_time": int(time.time())}
+    identity = validate(config, json.dumps(pair(claims)))
+    assert identity.product_roles[config.product] == role
+    assert "mfa" in identity.amr
 
 
 @pytest.mark.parametrize("additional", [[], ["https://other-product.example"]])

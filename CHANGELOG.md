@@ -6,6 +6,8 @@
 
 ## Unreleased
 
+- Accept the canonical Onesa `administrator` role alongside the legacy `admin` claim. Both require MFA and map to Robot's existing administrator guard. Product grants still do not enable physical actuation.
+
 - Require native simulator reset to verify simulation mode, no active legacy task, terminal task history, and an idle, healthy 33-axis simulator with physical actuation explicitly false. Regression cases reject incomplete acknowledgements, live mode, active work, faulted humanoid state and uncertain physical-actuation readback.
 
 - Make the native Robot API origin an explicit build-time Expo setting. Staging bundles can target the exact approved HTTPS Render staging API origin instead of silently calling production; only the production and staging service origins are allowlisted, and malformed, insecure, path-bearing and off-origin overrides fail closed. The production origin remains the default for production builds. Regression coverage checks accepted staging origins and rejected unsafe overrides. Internal Android/iOS CI builds now receive the exact approved staging API origin and verify that it is embedded in each retained bundle, preventing a test artifact from silently targeting production.
@@ -28,7 +30,6 @@
   are preserved with a terminal integrity reason. Cleanup is deferred while the
   remote journal is failed. Regression coverage proves expired proposals no
   longer block MFA step-up and cannot be approved or replayed.
-
 
 - Preserve a masked sign-in password typed while the initial anonymous session
   lookup is pending. Its 401 no longer clears the field before the user submits;

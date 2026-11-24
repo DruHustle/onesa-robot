@@ -133,7 +133,7 @@ def validate(config: IdentityConfig, packed: str, nonce: str | None = None) -> I
         if any(type(t) is not int or not 0 <= t <= now for t in [factor, authenticated]):
             raise rejected()
         # Existing APIs require MFA evidence at the administrator boundary.
-        if roles[0] == "admin" and (not factor or now - factor > 300):
+        if roles[0] in {"admin", "administrator"} and (not factor or now - factor > 300):
             raise IdentityError(
                 "identity_mfa_required", "Complete MFA for administrator access", 403
             )

@@ -75,7 +75,8 @@ async function startIdentity(stepUp=false){
  try{
   const result=await client.beginIdentity(stepUp),target=new URL(result.authorization_url);
   if(target.origin+target.pathname!==identityEndpoint||target.username||target.password||target.hash)throw new Error('Onesa sign-in could not be verified.');
-  window.location.assign(target.href);
+  if(!stepUp&&returnedFromRegistration)window.location.replace(target.href);
+  else window.location.assign(target.href);
  }catch(error){notice(error.message);if(button)button.disabled=false;}
 }
 async function configureIdentity(){
@@ -87,16 +88,19 @@ async function configureIdentity(){
   const value=await client.identityConfig();identityEnabled=value.enabled===true;
   if(!identityEnabled&&!localSimulator)notice('Shared sign-in is not connected. Reload to retry or open Company Portal.');
   if(identityEnabled){
-   const account=new URL(value.account_url);identityEndpoint=value.authorization_endpoint||account.origin+'/api/v1/identity/auth';button.disabled=false;
-   const link=byId('onesa-account-link');if(link){link.href=account.href;link.hidden=false;}
+   const account=new URL(value.account_url);
+   identityEndpoint=value.authorization_endpoint||account.origin+'/api/v1/identity/auth';
+   button.disabled=false;
+   const accountLink=byId('onesa-account-link');
+   if(accountLink){accountLink.href=account.href;accountLink.hidden=false;}
+   const administratorLink=byId('identity-administrator-link');
+   if(administratorLink){
+    administratorLink.href=new URL('/admin?product=robot',account).toString();
+    administratorLink.hidden=!administrator;
+   }
    byId('login-form').hidden=true;byId('onesa-sign-in').hidden=Boolean(csrf);
    if(!csrf)byId('console-description').textContent='Sign in once with Onesa. Your approved Robot access is ready here.';
-   if(returnedFromRegistration){
-     const entry=new URL(window.location.href);
-     entry.searchParams.delete('registration');
-     window.history.replaceState(null,'',entry.pathname+entry.search+entry.hash);
-     await startIdentity();
-   }
+   if(returnedFromRegistration)await startIdentity();
   }
   if(window.location?.search){
    const outcome=new URLSearchParams(window.location.search).get('identity');
@@ -164,6 +168,8 @@ async function readPhysicalPermission() {
 }
 function setAdministrator(session) {
  administrator=session.role==='administrator';
+ const administratorLink=byId('identity-administrator-link');
+ if(administratorLink)administratorLink.hidden=!(administrator&&identityEnabled);
  clearPhysicalPermission();
  lastPermissionRead=0;
  byId('administrator').hidden=!administrator;

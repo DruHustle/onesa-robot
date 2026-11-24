@@ -50,7 +50,7 @@ for(const width of [390,768,1280])test(`one-account sign-in is accessible at ${w
  }finally{await fixture.server.close();}
 });
 
-test('registration return confirms Onesa before restoring a previous operator',async({page})=>{
+test('registration return retries Onesa before restoring a previous operator',async({page})=>{
  const fixture=await identityFixture(page,{signedIn:true});
  const priorReads=[];
  page.on('request',request=>{
@@ -58,7 +58,13 @@ test('registration return confirms Onesa before restoring a previous operator',a
   if(path==='/api/v1/auth/me'||path==='/api/v1/status')priorReads.push(path);
  });
  try{
+  await page.route('**/api/v1/auth/identity/start', route =>
+   route.fulfill({status:503,json:{detail:'Synthetic sign-in outage'}}),
+  {times:1});
   await page.goto(fixture.server.origin+'/console?registration=complete');
+  await expect(page.locator('#notice')).toContainText('Synthetic sign-in outage');
+  await expect(page).toHaveURL(fixture.server.origin+'/console?registration=complete');
+  await page.reload();
   await expect(page.getByRole('heading',{name:'Onesa account sign-in'})).toBeVisible();
   expect(priorReads).toEqual([]);
   expect(fixture.writes).toEqual([{path:'/api/v1/auth/identity/start',body:{step_up:false}}]);
@@ -119,6 +125,7 @@ test('viewer keeps a read-only workspace with Stop and sign-out available',async
   await expect(page.locator('#reset-submit')).toBeDisabled();
   await expect(page.locator('#proposal-submit')).toBeDisabled();
   await expect(page.locator('#administrator')).toBeHidden();
+  await expect(page.getByRole('link',{name:'Manage Onesa administrators'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Stop simulation',exact:true})).toBeEnabled();
   await expect(page.getByRole('button',{name:'Sign out of Onesa',exact:true})).toBeEnabled();
  }finally{await fixture.server.close();}
@@ -130,6 +137,7 @@ test('global administrator is visible but hardware remains unconnected',async({p
   await page.goto(fixture.server.origin+'/console');
   await expect(page.locator('#onesa-session-role')).toContainText('Onesa administrator · all applications');
   await expect(page.locator('#administrator')).toBeVisible();
+  await expect(page.getByRole('link',{name:'Manage Onesa administrators'})).toHaveAttribute('href','https://account.example.test/admin?product=robot');
   await expect(page.locator('#physical-controller-state')).toContainText('Not connected');
   await expect(page.locator('#physical-permission-password')).toBeHidden();
   await expect(page.locator('#physical-permission-password-confirmed')).toBeVisible();

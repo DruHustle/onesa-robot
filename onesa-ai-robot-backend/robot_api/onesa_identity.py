@@ -21,9 +21,9 @@ import httpx
 
 PRODUCTS = frozenset({"ai", "drone", "robot"})
 PRODUCT_ROLES = {
-    "ai": {"user", "admin"},
-    "drone": {"viewer", "operator", "admin"},
-    "robot": {"viewer", "operator", "admin"},
+    "ai": {"user", "admin", "administrator"},
+    "drone": {"viewer", "operator", "admin", "administrator"},
+    "robot": {"viewer", "operator", "admin", "administrator"},
 }
 MAX_RESPONSE_BYTES = 65536
 
@@ -287,7 +287,7 @@ def validate_session(
                 not isinstance(membership, dict)
                 or set(membership) != {"product", "tenant_id", "role"}
                 or membership["product"] != "drone"
-                or membership["role"] not in PRODUCT_ROLES["drone"]
+                or membership["role"] not in {"viewer", "operator", "admin"}
                 or str(UUID(membership["tenant_id"])) != membership["tenant_id"]
             ):
                 raise ValueError("Invalid assertion")
@@ -306,10 +306,10 @@ def validate_session(
             dict(product_roles),
             tuple(dict(item) for item in memberships),
         )
-        if ("global_admin" in roles or product_roles.get(config.product) == "admin") and not {
-            "otp",
-            "mfa",
-        }.intersection(amr):
+        elevated = "global_admin" in roles or (
+            product_roles.get(config.product) in {"admin", "administrator"}
+        )
+        if elevated and not {"otp", "mfa"}.intersection(amr):
             raise IdentityError(
                 "identity_mfa_required", "Complete MFA for administrator access", 403
             )

@@ -18,7 +18,7 @@ NETWORK = (
 
 
 def rewrite_sources(text, deb822=False, mirror_files=None):
-    """Change only the observed Azure mirror URI; retain trust and suite fields."""
+    """Replace only the known throttled runner archive mirrors; retain trust fields."""
     changes = 0
 
     def replace(match):
@@ -35,7 +35,7 @@ def rewrite_sources(text, deb822=False, mirror_files=None):
             uri = urlsplit(value)
         except ValueError:
             raise ValueError("Invalid Ubuntu mirror URI structure; no rewrite performed") from None
-        if uri.hostname != "azure.archive.ubuntu.com":
+        if uri.hostname not in {"azure.archive.ubuntu.com", "us-east-2.ec2.archive.ubuntu.com"}:
             return value
         try:
             port = uri.port
@@ -104,7 +104,7 @@ def mirror_uri_diagnostic(uri, line_number):
 
 
 def rewrite_mirror_list(text):
-    """Remove only Azure from the runner's referenced archive failover list."""
+    """Remove only reviewed runner-local regional mirrors when canonical TLS exists."""
     if len(text.splitlines()) > 32:
         raise ValueError("Unexpected mirror-list bounds")
     output = []
@@ -147,7 +147,7 @@ def rewrite_mirror_list(text):
                 "Unexpected runner mirror-list URI: "
                 + json.dumps(mirror_uri_diagnostic(uri, line_number), sort_keys=True)
             )
-        if uri.hostname == "azure.archive.ubuntu.com":
+        if uri.hostname in {"azure.archive.ubuntu.com", "us-east-2.ec2.archive.ubuntu.com"}:
             removed += 1
             continue
         if uri.hostname == "archive.ubuntu.com" and uri.scheme == "https":
