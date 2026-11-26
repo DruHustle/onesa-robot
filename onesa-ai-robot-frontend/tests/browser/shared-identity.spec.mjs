@@ -38,12 +38,12 @@ for(const width of [390,768,1280])test(`one-account sign-in is accessible at ${w
  const fixture=await identityFixture(page);
  try{
   await page.setViewportSize({width,height:850});await page.goto(fixture.server.origin+'/console');
-  await expect(page.getByRole('button',{name:'Continue with Onesa',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeVisible();
   await expect(page.locator('#login-form')).toBeHidden();
   await expect(page.getByRole('link',{name:'Manage your account and product access'})).toHaveAttribute('href','https://account.example.test/account');
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await page.getByRole('button',{name:'Continue with Onesa',exact:true}).focus();
-  await expect(page.getByRole('button',{name:'Continue with Onesa',exact:true})).toBeFocused();
+  await page.getByRole('button',{name:'Sign in',exact:true}).focus();
+  await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('heading',{name:'Onesa account sign-in'})).toBeVisible();
   expect(fixture.writes).toEqual([{path:'/api/v1/auth/identity/start',body:{step_up:false}}]);
@@ -151,7 +151,7 @@ test('an unavailable global logout reports local sign-out honestly',async({page}
   await page.getByRole('button',{name:'Sign out of Onesa',exact:true}).click();
   await expect(page.locator('#operator')).toBeHidden();
   await expect(page.locator('#notice')).toContainText('Signed out of Robot. Open your Onesa account');
-  await expect(page.getByRole('button',{name:'Continue with Onesa',exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Sign in',exact:true})).toBeVisible();
  }finally{await fixture.server.close();}
 });
 
@@ -187,7 +187,7 @@ test('missing product access has a clear recovery route and removes callback sta
  }finally{await fixture.server.close();}
 });
 
-for (const [tier, linkName] of [["user", "Create an Onesa account"], ["admin", "Request administrator access"]]) {
+for (const [tier, linkName] of [["user", "Create account"], ["admin", "Request administrator access"]]) {
   test(`${tier} registration returns to Robot and starts a new product sign-in`, async ({ page }) => {
     const fixture = await identityFixture(page, { signedIn: false });
     try {
