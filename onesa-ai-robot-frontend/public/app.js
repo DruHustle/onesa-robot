@@ -54,7 +54,7 @@ async function startIdentity(stepUp=false){
  if(button)button.disabled=true;
  try{
   const result=await client.beginIdentity(stepUp),target=new URL(result.authorization_url);
-  if(target.origin!==identityOrigin||target.pathname!=='/api/v1/identity/auth')throw new Error('Onesa sign-in could not be verified.');
+  if(target.origin!==identityOrigin||target.pathname!=='/api/v1/identity/auth')throw new Error('Sign-in could not be verified.');
   window.location.assign(target.href);
  }catch(error){notice(error.message);if(button)button.disabled=false;}
 }
@@ -70,7 +70,7 @@ async function configureIdentity(){
   }
   if(window.location?.search){
    const outcome=new URLSearchParams(window.location.search).get('identity');
-   const messages={access:'Robot access is not enabled for this account. Manage your product access from your Onesa account.',unavailable:'Onesa sign-in is temporarily unavailable. Please try again.',failed:'Sign-in could not be completed. Please start again.'};
+   const messages={access:'Robot access is not enabled for this account. Manage your product access from account settings.',unavailable:'Sign-in is temporarily unavailable. Please try again.',failed:'Sign-in could not be completed. Please start again.'};
    if(messages[outcome]){notice(messages[outcome]);window.history.replaceState(null,'','/console');}
   }
  }catch{notice('Sign-in settings are temporarily unavailable. Refresh this page to try again.');}
@@ -200,7 +200,7 @@ byId('proposal-form').addEventListener('submit',event=>{event.preventDefault();r
 byId('approval-form').addEventListener('submit',event=>{event.preventDefault();const confirmation=readConfirmation('approve-password');run(async()=>{await client.approve(proposalId,confirmation);byId('approval-form').hidden=true;proposalId='';},'Simulation running; heartbeat must remain connected.',event.currentTarget);});
 byId('cancel').addEventListener('click',()=>run(async()=>{await client.cancel(proposalId);byId('approval-form').hidden=true;proposalId='';},'Proposal cancelled.'));
 byId('stop').addEventListener('click',()=>run(()=>client.stop(),'Simulation stopped. Reset requires confirmation.'));
-byId('logout').addEventListener('click',()=>run(async()=>{const result=await client.logout();signedOut();if(result.identity_signed_out===false)throw new Error('Signed out of Robot. Open your Onesa account to finish signing out of other applications.');},identitySession?'Signed out of Onesa. Other applications will require sign-in.':'Signed out; this session cannot authorize further tasks.'));
+byId('logout').addEventListener('click',()=>run(async()=>{const result=await client.logout();signedOut();if(result.identity_signed_out===false)throw new Error('Signed out of Robot. Open account settings to finish signing out of other applications.');},identitySession?'Signed out of Onesa. Other applications will require sign-in.':'Signed out; this session cannot authorize further tasks.'));
 // No localStorage/sessionStorage, token URLs or persistence of operator credentials.
 
 function restoreSession({initial=false}={}){const current=++generation;return client.me().then(session=>{if(current!==generation)return;csrf=session.csrf;client.csrf=csrf;setIdentitySession(session);setAdministrator(session);byId('login-form').hidden=true;byId('operator').hidden=false;if(byId('onesa-sign-in'))byId('onesa-sign-in').hidden=true;sessionPresentation(true);inspector.authenticate();timer=setInterval(()=>refresh(false),500);return refresh();}).catch(error=>{if(current!==generation)return;if(error.status===401)signedOut({preserveInitialSignIn:initial});else if(error.name!=='AbortError')notice(error.message);});}
