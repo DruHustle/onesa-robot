@@ -187,7 +187,7 @@ test('missing product access has a clear recovery route and removes callback sta
  }finally{await fixture.server.close();}
 });
 
-for (const [tier, linkName] of [["user", "Create an Onesa account"], ["admin", "Request administrator access"]]) {
+for (const [tier, linkName] of [["user", "Create account"], ["admin", "Request administrator access"]]) {
   test(`${tier} registration returns to Robot and starts a new product sign-in`, async ({ page }) => {
     const fixture = await identityFixture(page, { signedIn: false });
     try {
